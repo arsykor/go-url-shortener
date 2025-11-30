@@ -45,7 +45,7 @@ func TestHandlerShortener_Post(t *testing.T) {
 			path:   "/wrong",
 			body:   "https://practicum.yandex.ru/",
 			want: want{
-				code: http.StatusNotFound,
+				code: http.StatusMethodNotAllowed,
 			},
 			wantErr: true,
 		},

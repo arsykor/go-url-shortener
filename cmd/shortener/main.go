@@ -14,11 +14,10 @@ func main() {
 	shortenerService := service.NewShortenerService(urlRepo)
 	shortenerHandler := handler.NewShortener(shortenerService)
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", shortenerHandler.HandlerShortener)
+	r := shortenerHandler.Router()
 
 	log.Printf("Server starting on http://localhost:8080")
-	if err := http.ListenAndServe(":8080", mux); err != nil {
+	if err := http.ListenAndServe(":8080", r); err != nil {
 		log.Fatal(err)
 	}
 }

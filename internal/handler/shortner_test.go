@@ -45,7 +45,7 @@ func TestHandlerShortener_Post(t *testing.T) {
 			path:   "/wrong",
 			body:   "https://practicum.yandex.ru/",
 			want: want{
-				code: http.StatusBadRequest,
+				code: http.StatusNotFound,
 			},
 			wantErr: true,
 		},
@@ -76,11 +76,12 @@ func TestHandlerShortener_Post(t *testing.T) {
 			repo := repository.NewInMemoryURLRepository()
 			svc := service.NewShortenerService(repo)
 			handler := NewShortener(svc)
+			r := handler.Router()
 
 			req := httptest.NewRequest(tt.method, tt.path, strings.NewReader(tt.body))
 			w := httptest.NewRecorder()
 
-			handler.HandlerShortener(w, req)
+			r.ServeHTTP(w, req)
 
 			res := w.Result()
 			defer res.Body.Close()
@@ -155,11 +156,12 @@ func TestHandlerShortener_Get(t *testing.T) {
 
 			svc := service.NewShortenerService(repo)
 			handler := NewShortener(svc)
+			r := handler.Router()
 
 			req := httptest.NewRequest(tt.method, tt.path, nil)
 			w := httptest.NewRecorder()
 
-			handler.HandlerShortener(w, req)
+			r.ServeHTTP(w, req)
 
 			res := w.Result()
 			defer res.Body.Close()
@@ -177,14 +179,16 @@ func TestHandlerShortener_UnsupportedMethod(t *testing.T) {
 	repo := repository.NewInMemoryURLRepository()
 	svc := service.NewShortenerService(repo)
 	handler := NewShortener(svc)
+	r := handler.Router()
 
 	req := httptest.NewRequest(http.MethodPut, "/", nil)
 	w := httptest.NewRecorder()
 
-	handler.HandlerShortener(w, req)
+	r.ServeHTTP(w, req)
 
 	res := w.Result()
 	defer res.Body.Close()
 
-	assert.Equal(t, http.StatusBadRequest, res.StatusCode)
+	// chi router returns 405 Method Not Allowed for unsupported methods
+	assert.Equal(t, http.StatusMethodNotAllowed, res.StatusCode)
 }

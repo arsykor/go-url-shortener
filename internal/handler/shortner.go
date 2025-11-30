@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/arsykor/go-url-shortener/internal/service"
+	"github.com/go-chi/chi/v5"
 )
 
 // Shortener handles HTTP requests for URL shortening
@@ -19,23 +20,19 @@ func NewShortener(service *service.ShortenerService) *Shortener {
 	}
 }
 
-func (h *Shortener) HandlerShortener(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case http.MethodPost:
-		h.handlePost(w, r)
-	case http.MethodGet:
-		h.handleGet(w, r)
-	default:
-		http.Error(w, "Bad request", http.StatusBadRequest)
-	}
+func (h *Shortener) Router() chi.Router {
+	r := chi.NewRouter()
+	r.Post("/", h.handlePost)
+	r.Get("/", h.handleGetEmpty)
+	r.Get("/{id}", h.handleGet)
+	return r
+}
+
+func (h *Shortener) handleGetEmpty(w http.ResponseWriter, r *http.Request) {
+	http.Error(w, "Bad request", http.StatusBadRequest)
 }
 
 func (h *Shortener) handlePost(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/" {
-		http.Error(w, "Bad request", http.StatusBadRequest)
-		return
-	}
-
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, "Bad request", http.StatusBadRequest)
@@ -57,7 +54,7 @@ func (h *Shortener) handlePost(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Shortener) handleGet(w http.ResponseWriter, r *http.Request) {
-	id := strings.TrimPrefix(r.URL.Path, "/")
+	id := chi.URLParam(r, "id")
 	if id == "" {
 		http.Error(w, "Bad request", http.StatusBadRequest)
 		return

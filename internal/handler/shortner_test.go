@@ -74,7 +74,7 @@ func TestHandlerShortener_Post(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := repository.NewInMemoryURLRepository()
-			svc := service.NewShortenerService(repo)
+			svc := service.NewShortenerService(repo, "http://localhost:8080")
 			handler := NewShortener(svc)
 			r := handler.Router()
 
@@ -154,7 +154,7 @@ func TestHandlerShortener_Get(t *testing.T) {
 				repo.Save(tt.setupID, tt.setupURL)
 			}
 
-			svc := service.NewShortenerService(repo)
+			svc := service.NewShortenerService(repo, "http://localhost:8080")
 			handler := NewShortener(svc)
 			r := handler.Router()
 
@@ -177,7 +177,7 @@ func TestHandlerShortener_Get(t *testing.T) {
 
 func TestHandlerShortener_UnsupportedMethod(t *testing.T) {
 	repo := repository.NewInMemoryURLRepository()
-	svc := service.NewShortenerService(repo)
+	svc := service.NewShortenerService(repo, "http://localhost:8080")
 	handler := NewShortener(svc)
 	r := handler.Router()
 

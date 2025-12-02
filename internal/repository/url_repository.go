@@ -1,5 +1,6 @@
 package repository
 
+// TODO: интерфейс временно здесь, позже перенесу в нужное место
 type URLRepository interface {
 	Save(shortID, originalURL string)
 	Get(shortID string) (string, bool)

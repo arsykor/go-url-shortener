@@ -189,6 +189,5 @@ func TestHandlerShortener_UnsupportedMethod(t *testing.T) {
 	res := w.Result()
 	defer res.Body.Close()
 
-	// chi router returns 405 Method Not Allowed for unsupported methods
 	assert.Equal(t, http.StatusMethodNotAllowed, res.StatusCode)
 }

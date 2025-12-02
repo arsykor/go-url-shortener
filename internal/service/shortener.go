@@ -7,15 +7,15 @@ import (
 	"github.com/arsykor/go-url-shortener/internal/repository"
 )
 
-const baseURL = "http://localhost:8080"
-
 type ShortenerService struct {
-	repo repository.URLRepository
+	repo    repository.URLRepository
+	baseURL string
 }
 
-func NewShortenerService(repo repository.URLRepository) *ShortenerService {
+func NewShortenerService(repo repository.URLRepository, baseURL string) *ShortenerService {
 	return &ShortenerService{
-		repo: repo,
+		repo:    repo,
+		baseURL: baseURL,
 	}
 }
 
@@ -35,7 +35,7 @@ func generateShortID() string {
 func (s *ShortenerService) ShortenURL(originalURL string) string {
 	shortID := generateShortID()
 	s.repo.Save(shortID, originalURL)
-	return baseURL + "/" + shortID
+	return s.baseURL + "/" + shortID
 }
 
 // GetOriginalURL retrieves the original URL by short ID

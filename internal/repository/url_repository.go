@@ -1,9 +1,13 @@
 package repository
 
+import (
+	"context"
+)
+
 // TODO: интерфейс временно здесь, позже перенесу в нужное место
 type URLRepository interface {
-	Save(shortID, originalURL string)
-	Get(shortID string) (string, bool)
+	Save(ctx context.Context, shortID, originalURL string)
+	Get(ctx context.Context, shortID string) (string, bool)
 }
 
 type InMemoryURLRepository struct {
@@ -17,12 +21,12 @@ func NewInMemoryURLRepository() *InMemoryURLRepository {
 }
 
 // Save stores a URL mapping
-func (r *InMemoryURLRepository) Save(shortID, originalURL string) {
+func (r *InMemoryURLRepository) Save(ctx context.Context, shortID, originalURL string) {
 	r.urls[shortID] = originalURL
 }
 
 // Get retrieves the original URL by short ID
-func (r *InMemoryURLRepository) Get(shortID string) (string, bool) {
+func (r *InMemoryURLRepository) Get(ctx context.Context, shortID string) (string, bool) {
 	url, exists := r.urls[shortID]
 	return url, exists
 }

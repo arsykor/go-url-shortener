@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -150,8 +151,9 @@ func TestHandlerShortener_Get(t *testing.T) {
 
 			// Prepare data
 			repo := repository.NewInMemoryURLRepository()
+			ctx := context.Background()
 			if tt.setupID != "" && tt.setupURL != "" {
-				repo.Save(tt.setupID, tt.setupURL)
+				repo.Save(ctx, tt.setupID, tt.setupURL)
 			}
 
 			svc := service.NewShortenerService(repo, "http://localhost:8080")

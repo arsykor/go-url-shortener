@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 
@@ -32,13 +33,13 @@ func generateShortID() string {
 }
 
 // ShortenURL creates a shortened URL for the given original URL
-func (s *ShortenerService) ShortenURL(originalURL string) string {
+func (s *ShortenerService) ShortenURL(ctx context.Context, originalURL string) string {
 	shortID := generateShortID()
-	s.repo.Save(shortID, originalURL)
+	s.repo.Save(ctx, shortID, originalURL)
 	return s.baseURL + "/" + shortID
 }
 
 // GetOriginalURL retrieves the original URL by short ID
-func (s *ShortenerService) GetOriginalURL(shortID string) (string, bool) {
-	return s.repo.Get(shortID)
+func (s *ShortenerService) GetOriginalURL(ctx context.Context, shortID string) (string, bool) {
+	return s.repo.Get(ctx, shortID)
 }

@@ -46,7 +46,7 @@ func (h *Shortener) handlePost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	shortURL := h.service.ShortenURL(originalURL)
+	shortURL := h.service.ShortenURL(r.Context(), originalURL)
 
 	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(http.StatusCreated)
@@ -60,7 +60,7 @@ func (h *Shortener) handleGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	originalURL, exists := h.service.GetOriginalURL(id)
+	originalURL, exists := h.service.GetOriginalURL(r.Context(), id)
 	if !exists {
 		http.Error(w, "Bad request", http.StatusBadRequest)
 		return

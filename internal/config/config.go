@@ -16,15 +16,21 @@ func Load() *Config {
 
 	_ = env.Parse(cfg)
 
-	if cfg.ServerAddress == "" {
-		flag.StringVar(&cfg.ServerAddress, "a", "localhost:8080", "HTTP server address")
-	}
+	envServerAddress := cfg.ServerAddress
+	envBaseURL := cfg.BaseURL
 
-	if cfg.BaseURL == "" {
-		flag.StringVar(&cfg.BaseURL, "b", "http://localhost:8080", "Base URL for shortened URLs")
-	}
+	flag.StringVar(&cfg.ServerAddress, "a", "localhost:8080", "HTTP server address")
+	flag.StringVar(&cfg.BaseURL, "b", "http://localhost:8080", "Base URL for shortened URLs")
 
 	flag.Parse()
+
+	if envServerAddress != "" {
+		cfg.ServerAddress = envServerAddress
+	}
+
+	if envBaseURL != "" {
+		cfg.BaseURL = envBaseURL
+	}
 
 	return cfg
 }

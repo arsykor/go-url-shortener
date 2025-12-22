@@ -10,6 +10,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 
 	"github.com/arsykor/go-url-shortener/internal/repository"
 	"github.com/arsykor/go-url-shortener/internal/service"
@@ -72,11 +73,13 @@ func TestHandlerShortener_Post(t *testing.T) {
 		},
 	}
 
+	logger := zap.NewNop().Sugar()
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := repository.NewInMemoryURLRepository()
 			svc := service.NewShortenerService(repo, "http://localhost:8080")
-			handler := NewShortener(svc)
+			handler := NewShortener(svc, logger)
 			r := handler.Router()
 
 			req := httptest.NewRequest(tt.method, tt.path, strings.NewReader(tt.body))
@@ -157,7 +160,8 @@ func TestHandlerShortener_Get(t *testing.T) {
 			}
 
 			svc := service.NewShortenerService(repo, "http://localhost:8080")
-			handler := NewShortener(svc)
+			logger := zap.NewNop().Sugar()
+			handler := NewShortener(svc, logger)
 			r := handler.Router()
 
 			req := httptest.NewRequest(tt.method, tt.path, nil)
@@ -180,7 +184,8 @@ func TestHandlerShortener_Get(t *testing.T) {
 func TestHandlerShortener_UnsupportedMethod(t *testing.T) {
 	repo := repository.NewInMemoryURLRepository()
 	svc := service.NewShortenerService(repo, "http://localhost:8080")
-	handler := NewShortener(svc)
+	logger := zap.NewNop().Sugar()
+	handler := NewShortener(svc, logger)
 	r := handler.Router()
 
 	req := httptest.NewRequest(http.MethodPut, "/", nil)

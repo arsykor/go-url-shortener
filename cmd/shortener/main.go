@@ -22,9 +22,9 @@ func main() {
 
 	urlRepo := repository.NewInMemoryURLRepository()
 	shortenerService := service.NewShortenerService(urlRepo, cfg.BaseURL)
-	shortenerHandler := handler.NewShortener(shortenerService, sugar)
+	shortenerHandler := handler.NewShortener(shortenerService)
 
-	r := shortenerHandler.Router()
+	r := shortenerHandler.Router(sugar)
 
 	sugar.Infow(
 		"Starting server",

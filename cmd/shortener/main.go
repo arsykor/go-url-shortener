@@ -20,7 +20,20 @@ func main() {
 	sugar := logger.Sugar()
 	cfg := config.Load()
 
-	urlRepo := repository.NewInMemoryURLRepository()
+	// Choose repository based on file storage path
+	var urlRepo repository.URLRepository
+	if cfg.FileStoragePath != "" {
+		fileRepo, err := repository.NewFileURLRepository(cfg.FileStoragePath)
+		if err != nil {
+			sugar.Fatalw("Failed to create file repository", "error", err)
+		}
+		urlRepo = fileRepo
+		sugar.Infow("Using file storage", "path", cfg.FileStoragePath)
+	} else {
+		urlRepo = repository.NewInMemoryURLRepository()
+		sugar.Info("Using in-memory storage")
+	}
+
 	shortenerService := service.NewShortenerService(urlRepo, cfg.BaseURL)
 	shortenerHandler := handler.NewShortener(shortenerService)
 

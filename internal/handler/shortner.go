@@ -35,6 +35,8 @@ func NewShortener(service *service.ShortenerService) *Shortener {
 
 func (h *Shortener) Router(logger *zap.SugaredLogger) chi.Router {
 	r := chi.NewRouter()
+	r.Use(middleware.WithGzipDecompression)
+	r.Use(middleware.WithGzipCompression)
 	r.Use(middleware.WithLogging(logger))
 	r.Post("/", h.handlePost)
 	r.Post("/api/shorten", h.handlePostJSON)

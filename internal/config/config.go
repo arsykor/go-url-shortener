@@ -15,7 +15,7 @@ type Config struct {
 func Load() *Config {
 	cfg := &Config{}
 
-	_ = env.Parse(cfg)
+	env.Parse(cfg)
 
 	envServerAddress := cfg.ServerAddress
 	envBaseURL := cfg.BaseURL

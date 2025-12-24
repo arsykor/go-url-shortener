@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/google/uuid"
 	"os"
 	"path/filepath"
 	"sync"
@@ -11,9 +12,9 @@ import (
 
 // StorageEntry represents a single entry in the file storage
 type StorageEntry struct {
-	UUID        string `json:"uuid"`
-	ShortURL    string `json:"short_url"`
-	OriginalURL string `json:"original_url"`
+	UUID        uuid.UUID `json:"uuid"`
+	ShortURL    string    `json:"short_url"`
+	OriginalURL string    `json:"original_url"`
 }
 
 // FileURLRepository implements URLRepository using file storage

@@ -1,26 +1,49 @@
 package main
 
 import (
-	"log"
 	"net/http"
 
 	"github.com/arsykor/go-url-shortener/internal/config"
 	"github.com/arsykor/go-url-shortener/internal/handler"
 	"github.com/arsykor/go-url-shortener/internal/repository"
 	"github.com/arsykor/go-url-shortener/internal/service"
+	"go.uber.org/zap"
 )
 
 func main() {
+	logger, err := zap.NewDevelopment()
+	if err != nil {
+		panic(err)
+	}
+	defer logger.Sync()
+
+	sugar := logger.Sugar()
 	cfg := config.Load()
 
-	urlRepo := repository.NewInMemoryURLRepository()
+	// Choose repository based on file storage path
+	var urlRepo repository.URLRepository
+	if cfg.FileStoragePath != "" {
+		fileRepo, err := repository.NewFileURLRepository(cfg.FileStoragePath)
+		if err != nil {
+			sugar.Fatalw("Failed to create file repository", "error", err)
+		}
+		urlRepo = fileRepo
+		sugar.Infow("Using file storage", "path", cfg.FileStoragePath)
+	} else {
+		urlRepo = repository.NewInMemoryURLRepository()
+		sugar.Info("Using in-memory storage")
+	}
+
 	shortenerService := service.NewShortenerService(urlRepo, cfg.BaseURL)
 	shortenerHandler := handler.NewShortener(shortenerService)
 
-	r := shortenerHandler.Router()
+	r := shortenerHandler.Router(sugar)
 
-	log.Printf("Server starting on %s", cfg.ServerAddress)
+	sugar.Infow(
+		"Starting server",
+		"addr", cfg.ServerAddress,
+	)
 	if err := http.ListenAndServe(cfg.ServerAddress, r); err != nil {
-		log.Fatal(err)
+		sugar.Fatalw(err.Error(), "event", "start server")
 	}
 }

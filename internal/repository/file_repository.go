@@ -21,9 +21,8 @@ type StorageEntry struct {
 type FileURLRepository struct {
 	mu       sync.RWMutex
 	filePath string
-	urls     map[string]string // shortID -> originalURL
-	uuidMap  map[string]string // shortID -> uuid
-	nextUUID int
+	urls     map[string]string    // shortID -> originalURL
+	uuidMap  map[string]uuid.UUID // shortID -> uuid
 }
 
 // NewFileURLRepository creates a new file-based repository
@@ -31,8 +30,7 @@ func NewFileURLRepository(filePath string) (*FileURLRepository, error) {
 	repo := &FileURLRepository{
 		filePath: filePath,
 		urls:     make(map[string]string),
-		uuidMap:  make(map[string]string),
-		nextUUID: 1,
+		uuidMap:  make(map[string]uuid.UUID),
 	}
 
 	// Load existing data from file
@@ -83,14 +81,6 @@ func (r *FileURLRepository) loadFromFile() error {
 	for _, entry := range entries {
 		r.urls[entry.ShortURL] = entry.OriginalURL
 		r.uuidMap[entry.ShortURL] = entry.UUID
-
-		// Track the highest UUID number
-		var uuidNum int
-		if _, err := fmt.Sscanf(entry.UUID, "%d", &uuidNum); err == nil {
-			if uuidNum >= r.nextUUID {
-				r.nextUUID = uuidNum + 1
-			}
-		}
 	}
 
 	return nil
@@ -103,10 +93,7 @@ func (r *FileURLRepository) Save(ctx context.Context, shortID, originalURL strin
 	// Check if this shortID already exists
 	_, exists := r.uuidMap[shortID]
 	if !exists {
-		// Generate new UUID
-		uuid := fmt.Sprintf("%d", r.nextUUID)
-		r.nextUUID++
-		r.uuidMap[shortID] = uuid
+		r.uuidMap[shortID] = uuid.New()
 	}
 
 	r.urls[shortID] = originalURL

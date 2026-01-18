@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/arsykor/go-url-shortener/internal/config"
+	"github.com/arsykor/go-url-shortener/internal/database"
 	"github.com/arsykor/go-url-shortener/internal/handler"
 	"github.com/arsykor/go-url-shortener/internal/repository"
 	"github.com/arsykor/go-url-shortener/internal/service"
@@ -20,6 +21,17 @@ func main() {
 	sugar := logger.Sugar()
 	cfg := config.Load()
 
+	var db handler.DB
+	if cfg.DatabaseDSN != "" {
+		databaseConn, err := database.NewDB(cfg.DatabaseDSN)
+		if err != nil {
+			sugar.Fatalw("Failed to connect to database", "error", err)
+		}
+		defer databaseConn.Close()
+		db = databaseConn
+		sugar.Info("Database connection established")
+	}
+
 	// Choose repository based on file storage path
 	var urlRepo repository.URLRepository
 	if cfg.FileStoragePath != "" {
@@ -35,7 +47,7 @@ func main() {
 	}
 
 	shortenerService := service.NewShortenerService(urlRepo, cfg.BaseURL)
-	shortenerHandler := handler.NewShortener(shortenerService)
+	shortenerHandler := handler.NewShortener(shortenerService, db)
 
 	r := shortenerHandler.Router(sugar)
 

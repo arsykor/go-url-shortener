@@ -25,11 +25,18 @@ type shortenResponse struct {
 // Shortener handles HTTP requests for URL shortening
 type Shortener struct {
 	service *service.ShortenerService
+	db      DB
 }
 
-func NewShortener(service *service.ShortenerService) *Shortener {
+// DB interface for database operations
+type DB interface {
+	Ping() error
+}
+
+func NewShortener(service *service.ShortenerService, db DB) *Shortener {
 	return &Shortener{
 		service: service,
+		db:      db,
 	}
 }
 
@@ -38,11 +45,26 @@ func (h *Shortener) Router(logger *zap.SugaredLogger) chi.Router {
 	r.Use(middleware.WithGzipDecompression)
 	r.Use(middleware.WithGzipCompression)
 	r.Use(middleware.WithLogging(logger))
+	r.Get("/ping", h.handlePing)
 	r.Post("/", h.handlePost)
 	r.Post("/api/shorten", h.handlePostJSON)
 	r.Get("/", h.handleGetEmpty)
 	r.Get("/{id}", h.handleGet)
 	return r
+}
+
+func (h *Shortener) handlePing(w http.ResponseWriter, r *http.Request) {
+	if h.db == nil {
+		http.Error(w, "Database not configured", http.StatusInternalServerError)
+		return
+	}
+
+	if err := h.db.Ping(); err != nil {
+		http.Error(w, "Database connection failed", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
 }
 
 func (h *Shortener) handleGetEmpty(w http.ResponseWriter, r *http.Request) {

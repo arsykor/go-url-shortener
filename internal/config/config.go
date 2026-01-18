@@ -10,6 +10,7 @@ type Config struct {
 	ServerAddress   string `env:"SERVER_ADDRESS"`
 	BaseURL         string `env:"BASE_URL"`
 	FileStoragePath string `env:"FILE_STORAGE_PATH"`
+	DatabaseDSN     string `env:"DATABASE_DSN"`
 }
 
 func Load() *Config {
@@ -20,10 +21,12 @@ func Load() *Config {
 	envServerAddress := cfg.ServerAddress
 	envBaseURL := cfg.BaseURL
 	envFileStoragePath := cfg.FileStoragePath
+	envDatabaseDSN := cfg.DatabaseDSN
 
 	flag.StringVar(&cfg.ServerAddress, "a", "localhost:8080", "HTTP server address")
 	flag.StringVar(&cfg.BaseURL, "b", "http://localhost:8080", "Base URL for shortened URLs")
 	flag.StringVar(&cfg.FileStoragePath, "f", "/tmp/shortener-db.json", "File storage path")
+	flag.StringVar(&cfg.DatabaseDSN, "d", "", "Database connection string (DSN)")
 
 	flag.Parse()
 
@@ -38,6 +41,10 @@ func Load() *Config {
 
 	if envFileStoragePath != "" {
 		cfg.FileStoragePath = envFileStoragePath
+	}
+
+	if envDatabaseDSN != "" {
+		cfg.DatabaseDSN = envDatabaseDSN
 	}
 
 	return cfg

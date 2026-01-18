@@ -21,7 +21,10 @@ func main() {
 	sugar := logger.Sugar()
 	cfg := config.Load()
 
+	// Priority: DATABASE_DSN > FILE_STORAGE_PATH > in-memory
+	var urlRepo service.URLRepository
 	var db handler.DB
+
 	if cfg.DatabaseDSN != "" {
 		databaseConn, err := database.NewDB(cfg.DatabaseDSN)
 		if err != nil {
@@ -29,12 +32,9 @@ func main() {
 		}
 		defer databaseConn.Close()
 		db = databaseConn
-		sugar.Info("Database connection established")
-	}
-
-	// Choose repository based on file storage path
-	var urlRepo repository.URLRepository
-	if cfg.FileStoragePath != "" {
+		urlRepo = repository.NewPostgresURLRepository(databaseConn.DB)
+		sugar.Info("Using PostgreSQL storage")
+	} else if cfg.FileStoragePath != "" {
 		fileRepo, err := repository.NewFileURLRepository(cfg.FileStoragePath)
 		if err != nil {
 			sugar.Fatalw("Failed to create file repository", "error", err)

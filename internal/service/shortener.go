@@ -4,16 +4,19 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
-
-	"github.com/arsykor/go-url-shortener/internal/repository"
 )
 
 type ShortenerService struct {
-	repo    repository.URLRepository
+	repo    URLRepository
 	baseURL string
 }
 
-func NewShortenerService(repo repository.URLRepository, baseURL string) *ShortenerService {
+type URLRepository interface {
+	Save(ctx context.Context, shortID, originalURL string)
+	Get(ctx context.Context, shortID string) (string, bool)
+}
+
+func NewShortenerService(repo URLRepository, baseURL string) *ShortenerService {
 	return &ShortenerService{
 		repo:    repo,
 		baseURL: baseURL,

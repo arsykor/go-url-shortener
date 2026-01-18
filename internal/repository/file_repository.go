@@ -17,7 +17,7 @@ type StorageEntry struct {
 	OriginalURL string    `json:"original_url"`
 }
 
-// FileURLRepository implements URLRepository using file storage
+// FileURLRepository implements service.URLRepository using file storage
 type FileURLRepository struct {
 	mu       sync.RWMutex
 	filePath string

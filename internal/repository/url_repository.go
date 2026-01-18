@@ -5,12 +5,6 @@ import (
 	"sync"
 )
 
-// TODO: интерфейс временно здесь, позже перенесу в нужное место
-type URLRepository interface {
-	Save(ctx context.Context, shortID, originalURL string)
-	Get(ctx context.Context, shortID string) (string, bool)
-}
-
 type InMemoryURLRepository struct {
 	mu   sync.RWMutex
 	urls map[string]string

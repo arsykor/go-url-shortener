@@ -186,7 +186,7 @@ func TestHandlerShortener_UnsupportedMethod(t *testing.T) {
 	repo := repository.NewInMemoryURLRepository()
 	svc := service.NewShortenerService(repo, "http://localhost:8080")
 	logger := zap.NewNop().Sugar()
-	handler := NewShortener(svc)
+	handler := NewShortener(svc, nil)
 	r := handler.Router(logger)
 
 	req := httptest.NewRequest(http.MethodPut, "/", nil)

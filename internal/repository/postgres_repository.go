@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+
+	"github.com/arsykor/go-url-shortener/internal/service"
 )
 
 // PostgresURLRepository implements service.URLRepository using PostgreSQL
@@ -47,4 +49,42 @@ func (r *PostgresURLRepository) Get(ctx context.Context, shortID string) (string
 	}
 
 	return originalURL, true
+}
+
+// SaveBatch stores multiple URL mappings in a single transaction
+func (r *PostgresURLRepository) SaveBatch(ctx context.Context, items []service.BatchItem) {
+	if len(items) == 0 {
+		return
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		_ = fmt.Errorf("failed to begin transaction: %w", err)
+		return
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.PrepareContext(ctx, `
+		INSERT INTO url_shortener (short_url, original_url)
+		VALUES ($1, $2)
+		ON CONFLICT (short_url) 
+		DO UPDATE SET original_url = EXCLUDED.original_url
+	`)
+	if err != nil {
+		_ = fmt.Errorf("failed to prepare statement: %w", err)
+		return
+	}
+	defer stmt.Close()
+
+	for _, item := range items {
+		_, err := stmt.ExecContext(ctx, item.ShortID, item.OriginalURL)
+		if err != nil {
+			_ = fmt.Errorf("failed to save URL in batch: %w", err)
+			return
+		}
+	}
+	
+	if err := tx.Commit(); err != nil {
+		_ = fmt.Errorf("failed to commit transaction: %w", err)
+	}
 }

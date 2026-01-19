@@ -5,5 +5,3 @@ CREATE TABLE IF NOT EXISTS url_shortener (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX IF NOT EXISTS idx_short_url ON url_shortener(short_url);
-

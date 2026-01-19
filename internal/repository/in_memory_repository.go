@@ -9,20 +9,31 @@ import (
 
 type InMemoryURLRepository struct {
 	mu   sync.RWMutex
-	urls map[string]string
+	urls map[string]string // shortID -> originalURL
+	reverseUrls map[string]string // originalURL -> shortID
 }
 
 func NewInMemoryURLRepository() *InMemoryURLRepository {
 	return &InMemoryURLRepository{
 		urls: make(map[string]string),
+		reverseUrls: make(map[string]string),
 	}
 }
 
 // Save stores a URL mapping
-func (r *InMemoryURLRepository) Save(ctx context.Context, shortID, originalURL string) {
+// Returns existing shortID and true if originalURL already exists
+func (r *InMemoryURLRepository) Save(ctx context.Context, shortID, originalURL string) (existingShortID string, conflict bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	
+	// Check if originalURL already exists
+	if existingShortID, exists := r.reverseUrls[originalURL]; exists {
+		return existingShortID, true
+	}
+	
 	r.urls[shortID] = originalURL
+	r.reverseUrls[originalURL] = shortID
+	return "", false
 }
 
 // Get retrieves the original URL by short ID

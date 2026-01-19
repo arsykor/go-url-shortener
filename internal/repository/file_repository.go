@@ -21,18 +21,20 @@ type StorageEntry struct {
 
 // FileURLRepository implements service.URLRepository using file storage
 type FileURLRepository struct {
-	mu       sync.RWMutex
-	filePath string
-	urls     map[string]string    // shortID -> originalURL
-	uuidMap  map[string]uuid.UUID // shortID -> uuid
+	mu          sync.RWMutex
+	filePath    string
+	urls        map[string]string    // shortID -> originalURL
+	uuidMap     map[string]uuid.UUID // shortID -> uuid
+	reverseUrls map[string]string    // originalURL -> shortID
 }
 
 // NewFileURLRepository creates a new file-based repository
 func NewFileURLRepository(filePath string) (*FileURLRepository, error) {
 	repo := &FileURLRepository{
-		filePath: filePath,
-		urls:     make(map[string]string),
-		uuidMap:  make(map[string]uuid.UUID),
+		filePath:    filePath,
+		urls:        make(map[string]string),
+		uuidMap:     make(map[string]uuid.UUID),
+		reverseUrls: make(map[string]string),
 	}
 
 	// Load existing data from file
@@ -83,22 +85,29 @@ func (r *FileURLRepository) loadFromFile() error {
 	for _, entry := range entries {
 		r.urls[entry.ShortURL] = entry.OriginalURL
 		r.uuidMap[entry.ShortURL] = entry.UUID
+		r.reverseUrls[entry.OriginalURL] = entry.ShortURL
 	}
 
 	return nil
 }
 
 // Save stores a URL mapping and persists to file
-func (r *FileURLRepository) Save(ctx context.Context, shortID, originalURL string) {
+// Returns existing shortID and true if originalURL already exists
+func (r *FileURLRepository) Save(ctx context.Context, shortID, originalURL string) (existingShortID string, conflict bool) {
 	r.mu.Lock()
+	defer r.mu.Unlock()
 
-	// Check if this shortID already exists
+	if existingShortID, exists := r.reverseUrls[originalURL]; exists {
+		return existingShortID, true
+	}
+	
 	_, exists := r.uuidMap[shortID]
 	if !exists {
 		r.uuidMap[shortID] = uuid.New()
 	}
 
 	r.urls[shortID] = originalURL
+	r.reverseUrls[originalURL] = shortID
 
 	entries := make([]StorageEntry, 0, len(r.urls))
 	for sid, origURL := range r.urls {
@@ -113,6 +122,7 @@ func (r *FileURLRepository) Save(ctx context.Context, shortID, originalURL strin
 	r.mu.Unlock()
 
 	r.writeToFile(entries)
+	return "", false
 }
 
 // writeToFile writes entries to file (called without lock)

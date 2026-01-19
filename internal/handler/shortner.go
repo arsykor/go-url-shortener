@@ -22,6 +22,18 @@ type shortenResponse struct {
 	Result string `json:"result"`
 }
 
+// batchRequestItem represents a single item in batch request
+type batchRequestItem struct {
+	CorrelationID string `json:"correlation_id"`
+	OriginalURL   string `json:"original_url"`
+}
+
+// batchResponseItem represents a single item in batch response
+type batchResponseItem struct {
+	CorrelationID string `json:"correlation_id"`
+	ShortURL      string `json:"short_url"`
+}
+
 // Shortener handles HTTP requests for URL shortening
 type Shortener struct {
 	service *service.ShortenerService
@@ -48,6 +60,7 @@ func (h *Shortener) Router(logger *zap.SugaredLogger) chi.Router {
 	r.Get("/ping", h.handlePing)
 	r.Post("/", h.handlePost)
 	r.Post("/api/shorten", h.handlePostJSON)
+	r.Post("/api/shorten/batch", h.handlePostBatch)
 	r.Get("/", h.handleGetEmpty)
 	r.Get("/{id}", h.handleGet)
 	return r
@@ -134,6 +147,59 @@ func (h *Shortener) handlePostJSON(w http.ResponseWriter, r *http.Request) {
 
 	response := shortenResponse{
 		Result: shortURL,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+}
+
+func (h *Shortener) handlePostBatch(w http.ResponseWriter, r *http.Request) {
+	var req []batchRequestItem
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+
+	if err := json.Unmarshal(body, &req); err != nil {
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+
+	if len(req) == 0 {
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+
+	originalURLs := make([]string, 0, len(req))
+	correlationMap := make(map[int]string) // index -> correlation_id
+
+	for i, item := range req {
+		originalURL := strings.TrimSpace(item.OriginalURL)
+		if originalURL == "" {
+			http.Error(w, "Bad request", http.StatusBadRequest)
+			return
+		}
+		originalURLs = append(originalURLs, originalURL)
+		correlationMap[i] = item.CorrelationID
+	}
+
+	batchItems := h.service.ShortenURLBatch(r.Context(), originalURLs)
+
+	response := make([]batchResponseItem, 0, len(batchItems))
+	baseURL := h.service.BaseURL()
+	for i, item := range batchItems {
+		response = append(response, batchResponseItem{
+			CorrelationID: correlationMap[i],
+			ShortURL:      baseURL + "/" + item.ShortID,
+		})
 	}
 
 	w.Header().Set("Content-Type", "application/json")

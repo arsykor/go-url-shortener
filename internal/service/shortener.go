@@ -12,7 +12,7 @@ type ShortenerService struct {
 }
 
 type URLRepository interface {
-	Save(ctx context.Context, shortID, originalURL string)
+	Save(ctx context.Context, shortID, originalURL string) (existingShortID string, conflict bool)
 	Get(ctx context.Context, shortID string) (string, bool)
 	SaveBatch(ctx context.Context, items []BatchItem)
 }
@@ -43,10 +43,14 @@ func generateShortID() string {
 }
 
 // ShortenURL creates a shortened URL for the given original URL
-func (s *ShortenerService) ShortenURL(ctx context.Context, originalURL string) string {
+// Returns the shortened URL and a boolean indicating if there was a conflict
+func (s *ShortenerService) ShortenURL(ctx context.Context, originalURL string) (shortURL string, conflict bool) {
 	shortID := generateShortID()
-	s.repo.Save(ctx, shortID, originalURL)
-	return s.baseURL + "/" + shortID
+	existingShortID, conflict := s.repo.Save(ctx, shortID, originalURL)
+	if conflict {
+		return s.baseURL + "/" + existingShortID, true
+	}
+	return s.baseURL + "/" + shortID, false
 }
 
 // GetOriginalURL retrieves the original URL by short ID

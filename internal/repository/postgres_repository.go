@@ -3,9 +3,12 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/arsykor/go-url-shortener/internal/service"
+	"github.com/jackc/pgerrcode"
+	"github.com/lib/pq"
 )
 
 // PostgresURLRepository implements service.URLRepository using PostgreSQL
@@ -21,7 +24,9 @@ func NewPostgresURLRepository(db *sql.DB) *PostgresURLRepository {
 }
 
 // Save stores a URL mapping
-func (r *PostgresURLRepository) Save(ctx context.Context, shortID, originalURL string) {
+// Returns existing shortID and true if originalURL already exists (conflict on original_url unique index)
+func (r *PostgresURLRepository) Save(ctx context.Context, shortID, originalURL string) (existingShortID string, conflict bool) {
+	// Try to insert
 	query := `
 		INSERT INTO url_shortener (short_url, original_url)
 		VALUES ($1, $2)
@@ -30,8 +35,21 @@ func (r *PostgresURLRepository) Save(ctx context.Context, shortID, originalURL s
 	`
 	_, err := r.db.ExecContext(ctx, query, shortID, originalURL)
 	if err != nil {
+		var pqErr *pq.Error
+		if errors.As(err, &pqErr) && pqErr.Code == pgerrcode.UniqueViolation {
+			if pqErr.Constraint == "idx_original_url" {
+				var existingShort string
+				getQuery := `SELECT short_url FROM url_shortener WHERE original_url = $1`
+				if err := r.db.QueryRowContext(ctx, getQuery, originalURL).Scan(&existingShort); err == nil {
+					return existingShort, true
+				}
+			}
+		}
 		_ = fmt.Errorf("failed to save URL: %w", err)
+		return "", false
 	}
+
+	return "", false
 }
 
 // Get retrieves the original URL by short ID
@@ -83,7 +101,7 @@ func (r *PostgresURLRepository) SaveBatch(ctx context.Context, items []service.B
 			return
 		}
 	}
-	
+
 	if err := tx.Commit(); err != nil {
 		_ = fmt.Errorf("failed to commit transaction: %w", err)
 	}

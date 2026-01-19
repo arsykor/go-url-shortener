@@ -98,10 +98,14 @@ func (h *Shortener) handlePost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	shortURL := h.service.ShortenURL(r.Context(), originalURL)
+	shortURL, conflict := h.service.ShortenURL(r.Context(), originalURL)
 
 	w.Header().Set("Content-Type", "text/plain")
-	w.WriteHeader(http.StatusCreated)
+	if conflict {
+		w.WriteHeader(http.StatusConflict)
+	} else {
+		w.WriteHeader(http.StatusCreated)
+	}
 	w.Write([]byte(shortURL))
 }
 
@@ -143,14 +147,18 @@ func (h *Shortener) handlePostJSON(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	shortURL := h.service.ShortenURL(r.Context(), originalURL)
+	shortURL, conflict := h.service.ShortenURL(r.Context(), originalURL)
 
 	response := shortenResponse{
 		Result: shortURL,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
+	if conflict {
+		w.WriteHeader(http.StatusConflict)
+	} else {
+		w.WriteHeader(http.StatusCreated)
+	}
 
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		http.Error(w, "Internal server error", http.StatusInternalServerError)

@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+
+	"github.com/arsykor/go-url-shortener/internal/service"
 )
 
 // StorageEntry represents a single entry in the file storage
@@ -141,4 +143,35 @@ func (r *FileURLRepository) Get(ctx context.Context, shortID string) (string, bo
 	defer r.mu.RUnlock()
 	url, exists := r.urls[shortID]
 	return url, exists
+}
+
+// SaveBatch stores multiple URL mappings in a single operation
+func (r *FileURLRepository) SaveBatch(ctx context.Context, items []service.BatchItem) {
+	if len(items) == 0 {
+		return
+	}
+
+	r.mu.Lock()
+
+	for _, item := range items {
+		_, exists := r.uuidMap[item.ShortID]
+		if !exists {
+			r.uuidMap[item.ShortID] = uuid.New()
+		}
+		r.urls[item.ShortID] = item.OriginalURL
+	}
+
+	entries := make([]StorageEntry, 0, len(r.urls))
+	for sid, origURL := range r.urls {
+		uuid := r.uuidMap[sid]
+		entries = append(entries, StorageEntry{
+			UUID:        uuid,
+			ShortURL:    sid,
+			OriginalURL: origURL,
+		})
+	}
+
+	r.mu.Unlock()
+
+	r.writeToFile(entries)
 }

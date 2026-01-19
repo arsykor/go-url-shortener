@@ -95,9 +95,9 @@ func (r *FileURLRepository) loadFromFile() error {
 // Returns existing shortID and true if originalURL already exists
 func (r *FileURLRepository) Save(ctx context.Context, shortID, originalURL string) (existingShortID string, conflict bool) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 
 	if existingShortID, exists := r.reverseUrls[originalURL]; exists {
+		r.mu.Unlock()
 		return existingShortID, true
 	}
 	

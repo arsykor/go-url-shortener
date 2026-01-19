@@ -3,6 +3,8 @@ package repository
 import (
 	"context"
 	"sync"
+
+	"github.com/arsykor/go-url-shortener/internal/service"
 )
 
 type InMemoryURLRepository struct {
@@ -29,4 +31,13 @@ func (r *InMemoryURLRepository) Get(ctx context.Context, shortID string) (string
 	defer r.mu.RUnlock()
 	url, exists := r.urls[shortID]
 	return url, exists
+}
+
+// SaveBatch stores multiple URL mappings in a single operation
+func (r *InMemoryURLRepository) SaveBatch(ctx context.Context, items []service.BatchItem) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, item := range items {
+		r.urls[item.ShortID] = item.OriginalURL
+	}
 }

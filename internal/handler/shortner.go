@@ -199,7 +199,11 @@ func (h *Shortener) handlePostBatch(w http.ResponseWriter, r *http.Request) {
 		correlationMap[i] = item.CorrelationID
 	}
 
-	batchItems := h.service.ShortenURLBatch(r.Context(), originalURLs)
+	batchItems, err := h.service.ShortenURLBatch(r.Context(), originalURLs)
+	if err != nil {
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
 
 	response := make([]batchResponseItem, 0, len(batchItems))
 	baseURL := h.service.BaseURL()

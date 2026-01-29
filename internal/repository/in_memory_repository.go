@@ -45,10 +45,11 @@ func (r *InMemoryURLRepository) Get(ctx context.Context, shortID string) (string
 }
 
 // SaveBatch stores multiple URL mappings in a single operation
-func (r *InMemoryURLRepository) SaveBatch(ctx context.Context, items []service.BatchItem) {
+func (r *InMemoryURLRepository) SaveBatch(ctx context.Context, items []service.BatchItem) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, item := range items {
 		r.urls[item.ShortID] = item.OriginalURL
 	}
+	return nil
 }

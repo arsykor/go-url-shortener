@@ -156,9 +156,9 @@ func (r *FileURLRepository) Get(ctx context.Context, shortID string) (string, bo
 }
 
 // SaveBatch stores multiple URL mappings in a single operation
-func (r *FileURLRepository) SaveBatch(ctx context.Context, items []service.BatchItem) {
+func (r *FileURLRepository) SaveBatch(ctx context.Context, items []service.BatchItem) error {
 	if len(items) == 0 {
-		return
+		return nil
 	}
 
 	r.mu.Lock()
@@ -183,5 +183,5 @@ func (r *FileURLRepository) SaveBatch(ctx context.Context, items []service.Batch
 
 	r.mu.Unlock()
 
-	r.writeToFile(entries)
+	return r.writeToFile(entries)
 }

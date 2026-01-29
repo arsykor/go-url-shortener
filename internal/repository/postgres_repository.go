@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log"
 
 	"github.com/arsykor/go-url-shortener/internal/service"
 	"github.com/jackc/pgerrcode"
@@ -45,7 +46,7 @@ func (r *PostgresURLRepository) Save(ctx context.Context, shortID, originalURL s
 				}
 			}
 		}
-		_ = fmt.Errorf("failed to save URL: %w", err)
+		log.Printf("failed to save URL: %v", err)
 		return "", false
 	}
 
@@ -62,7 +63,7 @@ func (r *PostgresURLRepository) Get(ctx context.Context, shortID string) (string
 		if err == sql.ErrNoRows {
 			return "", false
 		}
-		_ = fmt.Errorf("failed to get URL: %w", err)
+		log.Printf("failed to get URL: %v", err)
 		return "", false
 	}
 
@@ -70,15 +71,14 @@ func (r *PostgresURLRepository) Get(ctx context.Context, shortID string) (string
 }
 
 // SaveBatch stores multiple URL mappings in a single transaction
-func (r *PostgresURLRepository) SaveBatch(ctx context.Context, items []service.BatchItem) {
+func (r *PostgresURLRepository) SaveBatch(ctx context.Context, items []service.BatchItem) error {
 	if len(items) == 0 {
-		return
+		return nil
 	}
 
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
-		_ = fmt.Errorf("failed to begin transaction: %w", err)
-		return
+		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer tx.Rollback()
 
@@ -89,20 +89,20 @@ func (r *PostgresURLRepository) SaveBatch(ctx context.Context, items []service.B
 		DO UPDATE SET original_url = EXCLUDED.original_url
 	`)
 	if err != nil {
-		_ = fmt.Errorf("failed to prepare statement: %w", err)
-		return
+		return fmt.Errorf("failed to prepare statement: %w", err)
 	}
 	defer stmt.Close()
 
 	for _, item := range items {
 		_, err := stmt.ExecContext(ctx, item.ShortID, item.OriginalURL)
 		if err != nil {
-			_ = fmt.Errorf("failed to save URL in batch: %w", err)
-			return
+			return fmt.Errorf("failed to save URL in batch: %w", err)
 		}
 	}
 
 	if err := tx.Commit(); err != nil {
-		_ = fmt.Errorf("failed to commit transaction: %w", err)
+		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
+
+	return nil
 }

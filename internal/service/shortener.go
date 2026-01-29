@@ -14,7 +14,7 @@ type ShortenerService struct {
 type URLRepository interface {
 	Save(ctx context.Context, shortID, originalURL string) (existingShortID string, conflict bool)
 	Get(ctx context.Context, shortID string) (string, bool)
-	SaveBatch(ctx context.Context, items []BatchItem)
+	SaveBatch(ctx context.Context, items []BatchItem) error
 }
 
 // BatchItem represents a single item in a batch operation
@@ -64,9 +64,9 @@ func (s *ShortenerService) BaseURL() string {
 }
 
 // ShortenURLBatch creates shortened URLs for multiple URLs in a single operation
-func (s *ShortenerService) ShortenURLBatch(ctx context.Context, originalURLs []string) []BatchItem {
+func (s *ShortenerService) ShortenURLBatch(ctx context.Context, originalURLs []string) ([]BatchItem, error) {
 	if len(originalURLs) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	items := make([]BatchItem, 0, len(originalURLs))
@@ -77,7 +77,9 @@ func (s *ShortenerService) ShortenURLBatch(ctx context.Context, originalURLs []s
 		})
 	}
 
-	s.repo.SaveBatch(ctx, items)
+	if err := s.repo.SaveBatch(ctx, items); err != nil {
+		return nil, err
+	}
 
-	return items
+	return items, nil
 }

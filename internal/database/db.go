@@ -3,11 +3,11 @@ package database
 import (
 	"database/sql"
 	"fmt"
-	"path/filepath"
 
+	"github.com/arsykor/go-url-shortener/migrations"
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/postgres"
-	_ "github.com/golang-migrate/migrate/v4/source/file"
+	"github.com/golang-migrate/migrate/v4/source/iofs"
 	_ "github.com/lib/pq"
 )
 
@@ -31,7 +31,7 @@ func NewDB(dsn string) (*DB, error) {
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
-	if err := runMigrations(db, "migrations"); err != nil {
+	if err := runMigrations(db); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("failed to run migrations: %w", err)
 	}
@@ -39,20 +39,24 @@ func NewDB(dsn string) (*DB, error) {
 	return &DB{DB: db}, nil
 }
 
-func runMigrations(db *sql.DB, migrationsPath string) error {
-	path := filepath.ToSlash(migrationsPath)
+func runMigrations(db *sql.DB) error {
+	migrationsDir := migrations.FS
 
-	migrationURL := "file://" + path
+	sourceDriver, err := iofs.New(migrationsDir, ".")
+	if err != nil {
+		return fmt.Errorf("failed to create source driver: %w", err)
+	}
 
-	driver, err := postgres.WithInstance(db, &postgres.Config{})
+	dbDriver, err := postgres.WithInstance(db, &postgres.Config{})
 	if err != nil {
 		return fmt.Errorf("failed to create postgres driver: %w", err)
 	}
 
-	m, err := migrate.NewWithDatabaseInstance(
-		migrationURL,
+	m, err := migrate.NewWithInstance(
+		"iofs",
+		sourceDriver,
 		"postgres",
-		driver,
+		dbDriver,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to create migrate instance: %w", err)

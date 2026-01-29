@@ -4,16 +4,26 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
-
-	"github.com/arsykor/go-url-shortener/internal/repository"
 )
 
 type ShortenerService struct {
-	repo    repository.URLRepository
+	repo    URLRepository
 	baseURL string
 }
 
-func NewShortenerService(repo repository.URLRepository, baseURL string) *ShortenerService {
+type URLRepository interface {
+	Save(ctx context.Context, shortID, originalURL string) (existingShortID string, conflict bool)
+	Get(ctx context.Context, shortID string) (string, bool)
+	SaveBatch(ctx context.Context, items []BatchItem) error
+}
+
+// BatchItem represents a single item in a batch operation
+type BatchItem struct {
+	ShortID     string
+	OriginalURL string
+}
+
+func NewShortenerService(repo URLRepository, baseURL string) *ShortenerService {
 	return &ShortenerService{
 		repo:    repo,
 		baseURL: baseURL,
@@ -33,13 +43,43 @@ func generateShortID() string {
 }
 
 // ShortenURL creates a shortened URL for the given original URL
-func (s *ShortenerService) ShortenURL(ctx context.Context, originalURL string) string {
+// Returns the shortened URL and a boolean indicating if there was a conflict
+func (s *ShortenerService) ShortenURL(ctx context.Context, originalURL string) (shortURL string, conflict bool) {
 	shortID := generateShortID()
-	s.repo.Save(ctx, shortID, originalURL)
-	return s.baseURL + "/" + shortID
+	existingShortID, conflict := s.repo.Save(ctx, shortID, originalURL)
+	if conflict {
+		return s.baseURL + "/" + existingShortID, true
+	}
+	return s.baseURL + "/" + shortID, false
 }
 
 // GetOriginalURL retrieves the original URL by short ID
 func (s *ShortenerService) GetOriginalURL(ctx context.Context, shortID string) (string, bool) {
 	return s.repo.Get(ctx, shortID)
+}
+
+// BaseURL returns the base URL for shortened URLs
+func (s *ShortenerService) BaseURL() string {
+	return s.baseURL
+}
+
+// ShortenURLBatch creates shortened URLs for multiple URLs in a single operation
+func (s *ShortenerService) ShortenURLBatch(ctx context.Context, originalURLs []string) ([]BatchItem, error) {
+	if len(originalURLs) == 0 {
+		return nil, nil
+	}
+
+	items := make([]BatchItem, 0, len(originalURLs))
+	for _, originalURL := range originalURLs {
+		items = append(items, BatchItem{
+			ShortID:     generateShortID(),
+			OriginalURL: originalURL,
+		})
+	}
+
+	if err := s.repo.SaveBatch(ctx, items); err != nil {
+		return nil, err
+	}
+
+	return items, nil
 }

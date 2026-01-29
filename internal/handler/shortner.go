@@ -22,14 +22,33 @@ type shortenResponse struct {
 	Result string `json:"result"`
 }
 
+// batchRequestItem represents a single item in batch request
+type batchRequestItem struct {
+	CorrelationID string `json:"correlation_id"`
+	OriginalURL   string `json:"original_url"`
+}
+
+// batchResponseItem represents a single item in batch response
+type batchResponseItem struct {
+	CorrelationID string `json:"correlation_id"`
+	ShortURL      string `json:"short_url"`
+}
+
 // Shortener handles HTTP requests for URL shortening
 type Shortener struct {
 	service *service.ShortenerService
+	db      DB
 }
 
-func NewShortener(service *service.ShortenerService) *Shortener {
+// DB interface for database operations
+type DB interface {
+	Ping() error
+}
+
+func NewShortener(service *service.ShortenerService, db DB) *Shortener {
 	return &Shortener{
 		service: service,
+		db:      db,
 	}
 }
 
@@ -38,11 +57,27 @@ func (h *Shortener) Router(logger *zap.SugaredLogger) chi.Router {
 	r.Use(middleware.WithGzipDecompression)
 	r.Use(middleware.WithGzipCompression)
 	r.Use(middleware.WithLogging(logger))
+	r.Get("/ping", h.handlePing)
 	r.Post("/", h.handlePost)
 	r.Post("/api/shorten", h.handlePostJSON)
+	r.Post("/api/shorten/batch", h.handlePostBatch)
 	r.Get("/", h.handleGetEmpty)
 	r.Get("/{id}", h.handleGet)
 	return r
+}
+
+func (h *Shortener) handlePing(w http.ResponseWriter, r *http.Request) {
+	if h.db == nil {
+		http.Error(w, "Database not configured", http.StatusInternalServerError)
+		return
+	}
+
+	if err := h.db.Ping(); err != nil {
+		http.Error(w, "Database connection failed", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
 }
 
 func (h *Shortener) handleGetEmpty(w http.ResponseWriter, r *http.Request) {
@@ -63,10 +98,14 @@ func (h *Shortener) handlePost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	shortURL := h.service.ShortenURL(r.Context(), originalURL)
+	shortURL, conflict := h.service.ShortenURL(r.Context(), originalURL)
 
 	w.Header().Set("Content-Type", "text/plain")
-	w.WriteHeader(http.StatusCreated)
+	if conflict {
+		w.WriteHeader(http.StatusConflict)
+	} else {
+		w.WriteHeader(http.StatusCreated)
+	}
 	w.Write([]byte(shortURL))
 }
 
@@ -108,10 +147,71 @@ func (h *Shortener) handlePostJSON(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	shortURL := h.service.ShortenURL(r.Context(), originalURL)
+	shortURL, conflict := h.service.ShortenURL(r.Context(), originalURL)
 
 	response := shortenResponse{
 		Result: shortURL,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if conflict {
+		w.WriteHeader(http.StatusConflict)
+	} else {
+		w.WriteHeader(http.StatusCreated)
+	}
+
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+}
+
+func (h *Shortener) handlePostBatch(w http.ResponseWriter, r *http.Request) {
+	var req []batchRequestItem
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+
+	if err := json.Unmarshal(body, &req); err != nil {
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+
+	if len(req) == 0 {
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+
+	originalURLs := make([]string, 0, len(req))
+	correlationMap := make(map[int]string) // index -> correlation_id
+
+	for i, item := range req {
+		originalURL := strings.TrimSpace(item.OriginalURL)
+		if originalURL == "" {
+			http.Error(w, "Bad request", http.StatusBadRequest)
+			return
+		}
+		originalURLs = append(originalURLs, originalURL)
+		correlationMap[i] = item.CorrelationID
+	}
+
+	batchItems, err := h.service.ShortenURLBatch(r.Context(), originalURLs)
+	if err != nil {
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	response := make([]batchResponseItem, 0, len(batchItems))
+	baseURL := h.service.BaseURL()
+	for i, item := range batchItems {
+		response = append(response, batchResponseItem{
+			CorrelationID: correlationMap[i],
+			ShortURL:      baseURL + "/" + item.ShortID,
+		})
 	}
 
 	w.Header().Set("Content-Type", "application/json")

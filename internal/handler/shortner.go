@@ -34,6 +34,12 @@ type batchResponseItem struct {
 	ShortURL      string `json:"short_url"`
 }
 
+// userURLResponse represents a single URL pair in GET /api/user/urls response
+type userURLResponse struct {
+	ShortURL    string `json:"short_url"`
+	OriginalURL string `json:"original_url"`
+}
+
 // Shortener handles HTTP requests for URL shortening
 type Shortener struct {
 	service *service.ShortenerService
@@ -57,10 +63,12 @@ func (h *Shortener) Router(logger *zap.SugaredLogger) chi.Router {
 	r.Use(middleware.WithGzipDecompression)
 	r.Use(middleware.WithGzipCompression)
 	r.Use(middleware.WithLogging(logger))
+	r.Use(middleware.WithAuth)
 	r.Get("/ping", h.handlePing)
 	r.Post("/", h.handlePost)
 	r.Post("/api/shorten", h.handlePostJSON)
 	r.Post("/api/shorten/batch", h.handlePostBatch)
+	r.Get("/api/user/urls", h.handleGetUserURLs)
 	r.Get("/", h.handleGetEmpty)
 	r.Get("/{id}", h.handleGet)
 	return r
@@ -98,7 +106,8 @@ func (h *Shortener) handlePost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	shortURL, conflict := h.service.ShortenURL(r.Context(), originalURL)
+	userID, _ := middleware.GetUserID(r.Context())
+	shortURL, conflict := h.service.ShortenURL(r.Context(), originalURL, userID)
 
 	w.Header().Set("Content-Type", "text/plain")
 	if conflict {
@@ -147,7 +156,8 @@ func (h *Shortener) handlePostJSON(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	shortURL, conflict := h.service.ShortenURL(r.Context(), originalURL)
+	userID, _ := middleware.GetUserID(r.Context())
+	shortURL, conflict := h.service.ShortenURL(r.Context(), originalURL, userID)
 
 	response := shortenResponse{
 		Result: shortURL,
@@ -199,7 +209,8 @@ func (h *Shortener) handlePostBatch(w http.ResponseWriter, r *http.Request) {
 		correlationMap[i] = item.CorrelationID
 	}
 
-	batchItems, err := h.service.ShortenURLBatch(r.Context(), originalURLs)
+	userID, _ := middleware.GetUserID(r.Context())
+	batchItems, err := h.service.ShortenURLBatch(r.Context(), originalURLs, userID)
 	if err != nil {
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
@@ -217,6 +228,40 @@ func (h *Shortener) handlePostBatch(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+}
+
+func (h *Shortener) handleGetUserURLs(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	urls, err := h.service.GetURLsByUser(r.Context(), userID)
+	if err != nil {
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	if len(urls) == 0 {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	baseURL := h.service.BaseURL()
+	response := make([]userURLResponse, 0, len(urls))
+	for _, u := range urls {
+		response = append(response, userURLResponse{
+			ShortURL:    baseURL + "/" + u.ShortURL,
+			OriginalURL: u.OriginalURL,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(response); err != nil {
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return

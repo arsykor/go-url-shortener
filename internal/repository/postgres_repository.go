@@ -26,15 +26,15 @@ func NewPostgresURLRepository(db *sql.DB) *PostgresURLRepository {
 
 // Save stores a URL mapping
 // Returns existing shortID and true if originalURL already exists (conflict on original_url unique index)
-func (r *PostgresURLRepository) Save(ctx context.Context, shortID, originalURL string) (existingShortID string, conflict bool) {
+func (r *PostgresURLRepository) Save(ctx context.Context, shortID, originalURL, userID string) (existingShortID string, conflict bool) {
 	// Try to insert
 	query := `
-		INSERT INTO url_shortener (short_url, original_url)
-		VALUES ($1, $2)
+		INSERT INTO url_shortener (short_url, original_url, user_id)
+		VALUES ($1, $2, $3)
 		ON CONFLICT (short_url) 
 		DO UPDATE SET original_url = EXCLUDED.original_url
 	`
-	_, err := r.db.ExecContext(ctx, query, shortID, originalURL)
+	_, err := r.db.ExecContext(ctx, query, shortID, originalURL, userID)
 	if err != nil {
 		var pqErr *pq.Error
 		if errors.As(err, &pqErr) && pqErr.Code == pgerrcode.UniqueViolation {
@@ -71,7 +71,7 @@ func (r *PostgresURLRepository) Get(ctx context.Context, shortID string) (string
 }
 
 // SaveBatch stores multiple URL mappings in a single transaction
-func (r *PostgresURLRepository) SaveBatch(ctx context.Context, items []service.BatchItem) error {
+func (r *PostgresURLRepository) SaveBatch(ctx context.Context, items []service.BatchItem, userID string) error {
 	if len(items) == 0 {
 		return nil
 	}
@@ -83,8 +83,8 @@ func (r *PostgresURLRepository) SaveBatch(ctx context.Context, items []service.B
 	defer tx.Rollback()
 
 	stmt, err := tx.PrepareContext(ctx, `
-		INSERT INTO url_shortener (short_url, original_url)
-		VALUES ($1, $2)
+		INSERT INTO url_shortener (short_url, original_url, user_id)
+		VALUES ($1, $2, $3)
 		ON CONFLICT (short_url) 
 		DO UPDATE SET original_url = EXCLUDED.original_url
 	`)
@@ -94,7 +94,7 @@ func (r *PostgresURLRepository) SaveBatch(ctx context.Context, items []service.B
 	defer stmt.Close()
 
 	for _, item := range items {
-		_, err := stmt.ExecContext(ctx, item.ShortID, item.OriginalURL)
+		_, err := stmt.ExecContext(ctx, item.ShortID, item.OriginalURL, userID)
 		if err != nil {
 			return fmt.Errorf("failed to save URL in batch: %w", err)
 		}
@@ -105,4 +105,29 @@ func (r *PostgresURLRepository) SaveBatch(ctx context.Context, items []service.B
 	}
 
 	return nil
+}
+
+// GetURLsByUser returns all URLs shortened by a specific user
+func (r *PostgresURLRepository) GetURLsByUser(ctx context.Context, userID string) ([]service.UserURL, error) {
+	query := `SELECT short_url, original_url FROM url_shortener WHERE user_id = $1`
+	rows, err := r.db.QueryContext(ctx, query, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query URLs by user: %w", err)
+	}
+	defer rows.Close()
+
+	var result []service.UserURL
+	for rows.Next() {
+		var u service.UserURL
+		if err := rows.Scan(&u.ShortURL, &u.OriginalURL); err != nil {
+			return nil, fmt.Errorf("failed to scan row: %w", err)
+		}
+		result = append(result, u)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows iteration error: %w", err)
+	}
+
+	return result, nil
 }

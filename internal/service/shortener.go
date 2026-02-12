@@ -12,14 +12,21 @@ type ShortenerService struct {
 }
 
 type URLRepository interface {
-	Save(ctx context.Context, shortID, originalURL string) (existingShortID string, conflict bool)
+	Save(ctx context.Context, shortID, originalURL, userID string) (existingShortID string, conflict bool)
 	Get(ctx context.Context, shortID string) (string, bool)
-	SaveBatch(ctx context.Context, items []BatchItem) error
+	SaveBatch(ctx context.Context, items []BatchItem, userID string) error
+	GetURLsByUser(ctx context.Context, userID string) ([]UserURL, error)
 }
 
 // BatchItem represents a single item in a batch operation
 type BatchItem struct {
 	ShortID     string
+	OriginalURL string
+}
+
+// UserURL represents a URL pair belonging to a user
+type UserURL struct {
+	ShortURL    string
 	OriginalURL string
 }
 
@@ -44,9 +51,9 @@ func generateShortID() string {
 
 // ShortenURL creates a shortened URL for the given original URL
 // Returns the shortened URL and a boolean indicating if there was a conflict
-func (s *ShortenerService) ShortenURL(ctx context.Context, originalURL string) (shortURL string, conflict bool) {
+func (s *ShortenerService) ShortenURL(ctx context.Context, originalURL, userID string) (shortURL string, conflict bool) {
 	shortID := generateShortID()
-	existingShortID, conflict := s.repo.Save(ctx, shortID, originalURL)
+	existingShortID, conflict := s.repo.Save(ctx, shortID, originalURL, userID)
 	if conflict {
 		return s.baseURL + "/" + existingShortID, true
 	}
@@ -64,7 +71,7 @@ func (s *ShortenerService) BaseURL() string {
 }
 
 // ShortenURLBatch creates shortened URLs for multiple URLs in a single operation
-func (s *ShortenerService) ShortenURLBatch(ctx context.Context, originalURLs []string) ([]BatchItem, error) {
+func (s *ShortenerService) ShortenURLBatch(ctx context.Context, originalURLs []string, userID string) ([]BatchItem, error) {
 	if len(originalURLs) == 0 {
 		return nil, nil
 	}
@@ -77,9 +84,14 @@ func (s *ShortenerService) ShortenURLBatch(ctx context.Context, originalURLs []s
 		})
 	}
 
-	if err := s.repo.SaveBatch(ctx, items); err != nil {
+	if err := s.repo.SaveBatch(ctx, items, userID); err != nil {
 		return nil, err
 	}
 
 	return items, nil
+}
+
+// GetURLsByUser returns all URLs shortened by a specific user
+func (s *ShortenerService) GetURLsByUser(ctx context.Context, userID string) ([]UserURL, error) {
+	return s.repo.GetURLsByUser(ctx, userID)
 }

@@ -142,7 +142,6 @@ func (r *PostgresURLRepository) DeleteURLs(ctx context.Context, shortIDs []strin
 		return nil
 	}
 
-	// Build placeholders: $1 is userID, $2..$N+1 are shortIDs
 	placeholders := make([]string, len(shortIDs))
 	args := make([]interface{}, 0, len(shortIDs)+1)
 	args = append(args, userID)

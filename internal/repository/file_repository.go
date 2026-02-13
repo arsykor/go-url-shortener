@@ -18,6 +18,7 @@ type StorageEntry struct {
 	ShortURL    string    `json:"short_url"`
 	OriginalURL string    `json:"original_url"`
 	UserID      string    `json:"user_id,omitempty"`
+	IsDeleted   bool      `json:"is_deleted,omitempty"`
 }
 
 // FileURLRepository implements service.URLRepository using file storage
@@ -28,6 +29,7 @@ type FileURLRepository struct {
 	uuidMap     map[string]uuid.UUID // shortID -> uuid
 	reverseUrls map[string]string    // originalURL -> shortID
 	userURLs    map[string][]string  // userID -> []shortID
+	deleted     map[string]bool      // shortID -> isDeleted
 }
 
 // NewFileURLRepository creates a new file-based repository
@@ -38,6 +40,7 @@ func NewFileURLRepository(filePath string) (*FileURLRepository, error) {
 		uuidMap:     make(map[string]uuid.UUID),
 		reverseUrls: make(map[string]string),
 		userURLs:    make(map[string][]string),
+		deleted:     make(map[string]bool),
 	}
 
 	// Load existing data from file
@@ -92,6 +95,9 @@ func (r *FileURLRepository) loadFromFile() error {
 		if entry.UserID != "" {
 			r.userURLs[entry.UserID] = append(r.userURLs[entry.UserID], entry.ShortURL)
 		}
+		if entry.IsDeleted {
+			r.deleted[entry.ShortURL] = true
+		}
 	}
 
 	return nil
@@ -143,6 +149,7 @@ func (r *FileURLRepository) buildEntries() []StorageEntry {
 			ShortURL:    sid,
 			OriginalURL: origURL,
 			UserID:      shortToUser[sid],
+			IsDeleted:   r.deleted[sid],
 		})
 	}
 	return entries
@@ -170,12 +177,16 @@ func (r *FileURLRepository) writeToFile(entries []StorageEntry) error {
 	return nil
 }
 
-// Get retrieves the original URL by short ID
-func (r *FileURLRepository) Get(ctx context.Context, shortID string) (string, bool) {
+// Get retrieves the original URL by short ID.
+// Returns originalURL, isDeleted flag, and whether the record exists.
+func (r *FileURLRepository) Get(ctx context.Context, shortID string) (string, bool, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	url, exists := r.urls[shortID]
-	return url, exists
+	if !exists {
+		return "", false, false
+	}
+	return url, r.deleted[shortID], true
 }
 
 // SaveBatch stores multiple URL mappings in a single operation
@@ -224,4 +235,27 @@ func (r *FileURLRepository) GetURLsByUser(ctx context.Context, userID string) ([
 		}
 	}
 	return result, nil
+}
+
+// DeleteURLs marks URLs as deleted.
+// Only URLs belonging to the given userID are affected.
+func (r *FileURLRepository) DeleteURLs(ctx context.Context, shortIDs []string, userID string) error {
+	r.mu.Lock()
+
+	// Build a set of shortIDs owned by this user
+	owned := make(map[string]bool)
+	for _, sid := range r.userURLs[userID] {
+		owned[sid] = true
+	}
+
+	for _, sid := range shortIDs {
+		if owned[sid] {
+			r.deleted[sid] = true
+		}
+	}
+
+	entries := r.buildEntries()
+	r.mu.Unlock()
+
+	return r.writeToFile(entries)
 }

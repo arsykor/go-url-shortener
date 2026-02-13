@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/arsykor/go-url-shortener/internal/service"
 	"github.com/jackc/pgerrcode"
@@ -53,21 +54,23 @@ func (r *PostgresURLRepository) Save(ctx context.Context, shortID, originalURL, 
 	return "", false
 }
 
-// Get retrieves the original URL by short ID
-func (r *PostgresURLRepository) Get(ctx context.Context, shortID string) (string, bool) {
+// Get retrieves the original URL by short ID.
+// Returns originalURL, isDeleted flag, and whether the record exists.
+func (r *PostgresURLRepository) Get(ctx context.Context, shortID string) (string, bool, bool) {
 	var originalURL string
-	query := `SELECT original_url FROM url_shortener WHERE short_url = $1`
+	var isDeleted bool
+	query := `SELECT original_url, is_deleted FROM url_shortener WHERE short_url = $1`
 
-	err := r.db.QueryRowContext(ctx, query, shortID).Scan(&originalURL)
+	err := r.db.QueryRowContext(ctx, query, shortID).Scan(&originalURL, &isDeleted)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return "", false
+			return "", false, false
 		}
 		log.Printf("failed to get URL: %v", err)
-		return "", false
+		return "", false, false
 	}
 
-	return originalURL, true
+	return originalURL, isDeleted, true
 }
 
 // SaveBatch stores multiple URL mappings in a single transaction
@@ -130,4 +133,34 @@ func (r *PostgresURLRepository) GetURLsByUser(ctx context.Context, userID string
 	}
 
 	return result, nil
+}
+
+// DeleteURLs marks URLs as deleted using a batch UPDATE.
+// Only URLs belonging to the given userID are affected.
+func (r *PostgresURLRepository) DeleteURLs(ctx context.Context, shortIDs []string, userID string) error {
+	if len(shortIDs) == 0 {
+		return nil
+	}
+
+	// Build placeholders: $1 is userID, $2..$N+1 are shortIDs
+	placeholders := make([]string, len(shortIDs))
+	args := make([]interface{}, 0, len(shortIDs)+1)
+	args = append(args, userID)
+
+	for i, id := range shortIDs {
+		placeholders[i] = fmt.Sprintf("$%d", i+2)
+		args = append(args, id)
+	}
+
+	query := fmt.Sprintf(
+		`UPDATE url_shortener SET is_deleted = TRUE WHERE user_id = $1 AND short_url IN (%s)`,
+		strings.Join(placeholders, ", "),
+	)
+
+	_, err := r.db.ExecContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("failed to delete URLs: %w", err)
+	}
+
+	return nil
 }

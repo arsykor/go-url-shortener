@@ -12,6 +12,7 @@ type InMemoryURLRepository struct {
 	urls        map[string]string   // shortID -> originalURL
 	reverseUrls map[string]string   // originalURL -> shortID
 	userURLs    map[string][]string // userID -> []shortID
+	deleted     map[string]bool     // shortID -> isDeleted
 }
 
 func NewInMemoryURLRepository() *InMemoryURLRepository {
@@ -19,6 +20,7 @@ func NewInMemoryURLRepository() *InMemoryURLRepository {
 		urls:        make(map[string]string),
 		reverseUrls: make(map[string]string),
 		userURLs:    make(map[string][]string),
+		deleted:     make(map[string]bool),
 	}
 }
 
@@ -41,12 +43,16 @@ func (r *InMemoryURLRepository) Save(ctx context.Context, shortID, originalURL, 
 	return "", false
 }
 
-// Get retrieves the original URL by short ID
-func (r *InMemoryURLRepository) Get(ctx context.Context, shortID string) (string, bool) {
+// Get retrieves the original URL by short ID.
+// Returns originalURL, isDeleted flag, and whether the record exists.
+func (r *InMemoryURLRepository) Get(ctx context.Context, shortID string) (string, bool, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	url, exists := r.urls[shortID]
-	return url, exists
+	if !exists {
+		return "", false, false
+	}
+	return url, r.deleted[shortID], true
 }
 
 // SaveBatch stores multiple URL mappings in a single operation
@@ -82,4 +88,24 @@ func (r *InMemoryURLRepository) GetURLsByUser(ctx context.Context, userID string
 		}
 	}
 	return result, nil
+}
+
+// DeleteURLs marks URLs as deleted.
+// Only URLs belonging to the given userID are affected.
+func (r *InMemoryURLRepository) DeleteURLs(ctx context.Context, shortIDs []string, userID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// Build a set of shortIDs owned by this user
+	owned := make(map[string]bool)
+	for _, sid := range r.userURLs[userID] {
+		owned[sid] = true
+	}
+
+	for _, sid := range shortIDs {
+		if owned[sid] {
+			r.deleted[sid] = true
+		}
+	}
+	return nil
 }

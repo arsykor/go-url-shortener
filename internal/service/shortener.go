@@ -4,18 +4,23 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"log"
+	"sync"
+	"time"
 )
 
 type ShortenerService struct {
-	repo    URLRepository
-	baseURL string
+	repo     URLRepository
+	baseURL  string
+	deleteCh chan DeleteTask
 }
 
 type URLRepository interface {
 	Save(ctx context.Context, shortID, originalURL, userID string) (existingShortID string, conflict bool)
-	Get(ctx context.Context, shortID string) (string, bool)
+	Get(ctx context.Context, shortID string) (originalURL string, isDeleted bool, exists bool)
 	SaveBatch(ctx context.Context, items []BatchItem, userID string) error
 	GetURLsByUser(ctx context.Context, userID string) ([]UserURL, error)
+	DeleteURLs(ctx context.Context, shortIDs []string, userID string) error
 }
 
 // BatchItem represents a single item in a batch operation
@@ -30,11 +35,20 @@ type UserURL struct {
 	OriginalURL string
 }
 
+// DeleteTask represents a single URL deletion task
+type DeleteTask struct {
+	ShortID string
+	UserID  string
+}
+
 func NewShortenerService(repo URLRepository, baseURL string) *ShortenerService {
-	return &ShortenerService{
-		repo:    repo,
-		baseURL: baseURL,
+	s := &ShortenerService{
+		repo:     repo,
+		baseURL:  baseURL,
+		deleteCh: make(chan DeleteTask, 1024),
 	}
+	go s.flushDeletes()
+	return s
 }
 
 // generateShortID generates a random short ID (8 characters)
@@ -61,7 +75,8 @@ func (s *ShortenerService) ShortenURL(ctx context.Context, originalURL, userID s
 }
 
 // GetOriginalURL retrieves the original URL by short ID
-func (s *ShortenerService) GetOriginalURL(ctx context.Context, shortID string) (string, bool) {
+// Returns originalURL, isDeleted, exists
+func (s *ShortenerService) GetOriginalURL(ctx context.Context, shortID string) (string, bool, bool) {
 	return s.repo.Get(ctx, shortID)
 }
 
@@ -94,4 +109,81 @@ func (s *ShortenerService) ShortenURLBatch(ctx context.Context, originalURLs []s
 // GetURLsByUser returns all URLs shortened by a specific user
 func (s *ShortenerService) GetURLsByUser(ctx context.Context, userID string) ([]UserURL, error) {
 	return s.repo.GetURLsByUser(ctx, userID)
+}
+
+// DeleteUserURLs accepts a list of short IDs and schedules them for async deletion.
+func (s *ShortenerService) DeleteUserURLs(shortIDs []string, userID string) {
+	// Create a channel for this request's delete tasks
+	inputCh := make(chan DeleteTask)
+	go func() {
+		defer close(inputCh)
+		for _, id := range shortIDs {
+			inputCh <- DeleteTask{ShortID: id, UserID: userID}
+		}
+	}()
+
+	// Drain this request's channel into the main delete channel
+	go func() {
+		for task := range inputCh {
+			s.deleteCh <- task
+		}
+	}()
+}
+
+// fanIn merges multiple input channels into a single output channel.
+func fanIn(doneCh chan struct{}, channels ...chan DeleteTask) chan DeleteTask {
+	finalCh := make(chan DeleteTask)
+	var wg sync.WaitGroup
+
+	for _, ch := range channels {
+		chClosure := ch
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for data := range chClosure {
+				select {
+				case <-doneCh:
+					return
+				case finalCh <- data:
+				}
+			}
+		}()
+	}
+
+	go func() {
+		wg.Wait()
+		close(finalCh)
+	}()
+
+	return finalCh
+}
+
+// flushDeletes runs in the background, reads from deleteCh and batch-deletes URLs.
+func (s *ShortenerService) flushDeletes() {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	var buffer []DeleteTask
+
+	for {
+		select {
+		case task := <-s.deleteCh:
+			buffer = append(buffer, task)
+		case <-ticker.C:
+			if len(buffer) == 0 {
+				continue
+			}
+			// Group by userID for batch update
+			grouped := make(map[string][]string)
+			for _, t := range buffer {
+				grouped[t.UserID] = append(grouped[t.UserID], t.ShortID)
+			}
+			for userID, shortIDs := range grouped {
+				if err := s.repo.DeleteURLs(context.Background(), shortIDs, userID); err != nil {
+					log.Printf("failed to delete URLs: %v", err)
+				}
+			}
+			buffer = buffer[:0]
+		}
+	}
 }

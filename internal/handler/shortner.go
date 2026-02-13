@@ -69,6 +69,7 @@ func (h *Shortener) Router(logger *zap.SugaredLogger) chi.Router {
 	r.Post("/api/shorten", h.handlePostJSON)
 	r.Post("/api/shorten/batch", h.handlePostBatch)
 	r.Get("/api/user/urls", h.handleGetUserURLs)
+	r.Delete("/api/user/urls", h.handleDeleteUserURLs)
 	r.Get("/", h.handleGetEmpty)
 	r.Get("/{id}", h.handleGet)
 	return r
@@ -125,9 +126,14 @@ func (h *Shortener) handleGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	originalURL, exists := h.service.GetOriginalURL(r.Context(), id)
+	originalURL, isDeleted, exists := h.service.GetOriginalURL(r.Context(), id)
 	if !exists {
 		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+
+	if isDeleted {
+		w.WriteHeader(http.StatusGone)
 		return
 	}
 
@@ -266,4 +272,36 @@ func (h *Shortener) handleGetUserURLs(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
+}
+
+// handleDeleteUserURLs handles DELETE /api/user/urls
+func (h *Shortener) handleDeleteUserURLs(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserID(r.Context())
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+
+	var shortIDs []string
+	if err := json.Unmarshal(body, &shortIDs); err != nil {
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+
+	if len(shortIDs) == 0 {
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+
+	// Schedule async deletion
+	h.service.DeleteUserURLs(shortIDs, userID)
+
+	w.WriteHeader(http.StatusAccepted)
 }

@@ -46,10 +46,10 @@ func main() {
 		sugar.Info("Using in-memory storage")
 	}
 
-	shortenerService := service.NewShortenerService(urlRepo, cfg.BaseURL)
-	shortenerHandler := handler.NewShortener(shortenerService, db)
+	shortenerService := service.NewShortenerService(urlRepo, cfg.BaseURL, sugar)
+	shortenerHandler := handler.NewShortener(shortenerService, db, sugar)
 
-	r := shortenerHandler.Router(sugar)
+	r := shortenerHandler.Router()
 
 	sugar.Infow(
 		"Starting server",

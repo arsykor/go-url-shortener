@@ -5,6 +5,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"net/http"
 
 	"github.com/google/uuid"
@@ -21,10 +22,25 @@ const (
 	secretKey = "super-secret-key"
 )
 
-// GetUserID extracts user ID from context
-func GetUserID(ctx context.Context) (string, bool) {
-	userID, ok := ctx.Value(UserIDKey).(string)
-	return userID, ok && userID != ""
+var (
+	ErrNoUserIDInContext = errors.New("user ID not found in context")
+	ErrInvalidUserIDType = errors.New("user ID in context has invalid type")
+)
+
+// GetUserID extracts user ID from context.
+func GetUserID(ctx context.Context) (string, error) {
+	val := ctx.Value(UserIDKey)
+	if val == nil {
+		return "", ErrNoUserIDInContext
+	}
+	userID, ok := val.(string)
+	if !ok {
+		return "", ErrInvalidUserIDType
+	}
+	if userID == "" {
+		return "", ErrNoUserIDInContext
+	}
+	return userID, nil
 }
 
 // signValue creates an HMAC signature for the given value

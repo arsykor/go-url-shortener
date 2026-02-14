@@ -4,14 +4,23 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
-	"log"
+	"errors"
+	"net/url"
 	"sync"
 	"time"
+
+	"go.uber.org/zap"
+)
+
+var (
+	ErrURLNotFound = errors.New("url not found")
+	ErrURLDeleted  = errors.New("url has been deleted")
 )
 
 type ShortenerService struct {
 	repo     URLRepository
 	baseURL  string
+	logger   *zap.SugaredLogger
 	deleteCh chan DeleteTask
 }
 
@@ -41,10 +50,11 @@ type DeleteTask struct {
 	UserID  string
 }
 
-func NewShortenerService(repo URLRepository, baseURL string) *ShortenerService {
+func NewShortenerService(repo URLRepository, baseURL string, logger *zap.SugaredLogger) *ShortenerService {
 	s := &ShortenerService{
 		repo:     repo,
 		baseURL:  baseURL,
+		logger:   logger,
 		deleteCh: make(chan DeleteTask, 1024),
 	}
 	go s.flushDeletes()
@@ -63,21 +73,36 @@ func generateShortID() string {
 	return encoded
 }
 
-// ShortenURL creates a shortened URL for the given original URL
-// Returns the shortened URL and a boolean indicating if there was a conflict
+func joinURL(base, path string) string {
+	result, err := url.JoinPath(base, path)
+	if err != nil {
+		return base + "/" + path
+	}
+	return result
+}
+
+// ShortenURL creates a shortened URL for the given original URL.
+// Returns the shortened URL and a boolean indicating if there was a conflict.
 func (s *ShortenerService) ShortenURL(ctx context.Context, originalURL, userID string) (shortURL string, conflict bool) {
 	shortID := generateShortID()
 	existingShortID, conflict := s.repo.Save(ctx, shortID, originalURL, userID)
 	if conflict {
-		return s.baseURL + "/" + existingShortID, true
+		return joinURL(s.baseURL, existingShortID), true
 	}
-	return s.baseURL + "/" + shortID, false
+	return joinURL(s.baseURL, shortID), false
 }
 
-// GetOriginalURL retrieves the original URL by short ID
-// Returns originalURL, isDeleted, exists
-func (s *ShortenerService) GetOriginalURL(ctx context.Context, shortID string) (string, bool, bool) {
-	return s.repo.Get(ctx, shortID)
+// GetOriginalURL retrieves the original URL by short ID.
+// Returns the original URL or a typed error: ErrURLNotFound / ErrURLDeleted.
+func (s *ShortenerService) GetOriginalURL(ctx context.Context, shortID string) (string, error) {
+	originalURL, isDeleted, exists := s.repo.Get(ctx, shortID)
+	if !exists {
+		return "", ErrURLNotFound
+	}
+	if isDeleted {
+		return "", ErrURLDeleted
+	}
+	return originalURL, nil
 }
 
 // BaseURL returns the base URL for shortened URLs
@@ -180,7 +205,7 @@ func (s *ShortenerService) flushDeletes() {
 			}
 			for userID, shortIDs := range grouped {
 				if err := s.repo.DeleteURLs(context.Background(), shortIDs, userID); err != nil {
-					log.Printf("failed to delete URLs: %v", err)
+					s.logger.Errorw("failed to delete URLs", "error", err, "userID", userID)
 				}
 			}
 			buffer = buffer[:0]

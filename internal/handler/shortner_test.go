@@ -79,9 +79,9 @@ func TestHandlerShortener_Post(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := repository.NewInMemoryURLRepository()
-			svc := service.NewShortenerService(repo, "http://localhost:8080")
-			handler := NewShortener(svc, nil)
-			r := handler.Router(logger)
+			svc := service.NewShortenerService(repo, "http://localhost:8080", logger)
+			handler := NewShortener(svc, nil, logger)
+			r := handler.Router()
 
 			req := httptest.NewRequest(tt.method, tt.path, strings.NewReader(tt.body))
 			w := httptest.NewRecorder()
@@ -150,6 +150,8 @@ func TestHandlerShortener_Get(t *testing.T) {
 		},
 	}
 
+	logger := zap.NewNop().Sugar()
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 
@@ -160,10 +162,9 @@ func TestHandlerShortener_Get(t *testing.T) {
 				repo.Save(ctx, tt.setupID, tt.setupURL, "")
 			}
 
-			svc := service.NewShortenerService(repo, "http://localhost:8080")
-			logger := zap.NewNop().Sugar()
-			handler := NewShortener(svc, nil)
-			r := handler.Router(logger)
+			svc := service.NewShortenerService(repo, "http://localhost:8080", logger)
+			handler := NewShortener(svc, nil, logger)
+			r := handler.Router()
 
 			req := httptest.NewRequest(tt.method, tt.path, nil)
 			w := httptest.NewRecorder()
@@ -183,11 +184,11 @@ func TestHandlerShortener_Get(t *testing.T) {
 }
 
 func TestHandlerShortener_UnsupportedMethod(t *testing.T) {
-	repo := repository.NewInMemoryURLRepository()
-	svc := service.NewShortenerService(repo, "http://localhost:8080")
 	logger := zap.NewNop().Sugar()
-	handler := NewShortener(svc, nil)
-	r := handler.Router(logger)
+	repo := repository.NewInMemoryURLRepository()
+	svc := service.NewShortenerService(repo, "http://localhost:8080", logger)
+	handler := NewShortener(svc, nil, logger)
+	r := handler.Router()
 
 	req := httptest.NewRequest(http.MethodPut, "/", nil)
 	w := httptest.NewRecorder()
@@ -282,9 +283,9 @@ func TestHandlerShortener_PostJSON(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := repository.NewInMemoryURLRepository()
-			svc := service.NewShortenerService(repo, "http://localhost:8080")
-			handler := NewShortener(svc, nil)
-			r := handler.Router(logger)
+			svc := service.NewShortenerService(repo, "http://localhost:8080", logger)
+			handler := NewShortener(svc, nil, logger)
+			r := handler.Router()
 
 			req := httptest.NewRequest(tt.method, tt.path, strings.NewReader(tt.body))
 			req.Header.Set("Content-Type", "application/json")

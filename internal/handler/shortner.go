@@ -119,7 +119,12 @@ func (h *Shortener) handlePost(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
-	shortURL, conflict := h.service.ShortenURL(r.Context(), originalURL, userID)
+	shortURL, conflict, err := h.service.ShortenURL(r.Context(), originalURL, userID)
+	if err != nil {
+		h.logger.Errorw("failed to build short URL", "error", err)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
 
 	w.Header().Set("Content-Type", "text/plain")
 	if conflict {
@@ -178,7 +183,12 @@ func (h *Shortener) handlePostJSON(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
-	shortURL, conflict := h.service.ShortenURL(r.Context(), originalURL, userID)
+	shortURL, conflict, err := h.service.ShortenURL(r.Context(), originalURL, userID)
+	if err != nil {
+		h.logger.Errorw("failed to build short URL", "error", err)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
 
 	response := shortenResponse{
 		Result: shortURL,
@@ -247,7 +257,12 @@ func (h *Shortener) handlePostBatch(w http.ResponseWriter, r *http.Request) {
 	baseURL := h.service.BaseURL()
 	response := make([]batchResponseItem, 0, len(batchItems))
 	for i, item := range batchItems {
-		shortURL, _ := url.JoinPath(baseURL, item.ShortID)
+		shortURL, err := url.JoinPath(baseURL, item.ShortID)
+		if err != nil {
+			h.logger.Errorw("failed to build short URL", "error", err)
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			return
+		}
 		response = append(response, batchResponseItem{
 			CorrelationID: correlationMap[i],
 			ShortURL:      shortURL,
@@ -286,7 +301,12 @@ func (h *Shortener) handleGetUserURLs(w http.ResponseWriter, r *http.Request) {
 	baseURL := h.service.BaseURL()
 	response := make([]userURLResponse, 0, len(urls))
 	for _, u := range urls {
-		shortURL, _ := url.JoinPath(baseURL, u.ShortURL)
+		shortURL, err := url.JoinPath(baseURL, u.ShortURL)
+		if err != nil {
+			h.logger.Errorw("failed to build short URL", "error", err)
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			return
+		}
 		response = append(response, userURLResponse{
 			ShortURL:    shortURL,
 			OriginalURL: u.OriginalURL,

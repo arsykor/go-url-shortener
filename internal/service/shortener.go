@@ -73,23 +73,16 @@ func generateShortID() string {
 	return encoded
 }
 
-func joinURL(base, path string) string {
-	result, err := url.JoinPath(base, path)
-	if err != nil {
-		return base + "/" + path
-	}
-	return result
-}
-
 // ShortenURL creates a shortened URL for the given original URL.
-// Returns the shortened URL and a boolean indicating if there was a conflict.
-func (s *ShortenerService) ShortenURL(ctx context.Context, originalURL, userID string) (shortURL string, conflict bool) {
+func (s *ShortenerService) ShortenURL(ctx context.Context, originalURL, userID string) (shortURL string, conflict bool, err error) {
 	shortID := generateShortID()
 	existingShortID, conflict := s.repo.Save(ctx, shortID, originalURL, userID)
 	if conflict {
-		return joinURL(s.baseURL, existingShortID), true
+		result, err := url.JoinPath(s.baseURL, existingShortID)
+		return result, true, err
 	}
-	return joinURL(s.baseURL, shortID), false
+	result, err := url.JoinPath(s.baseURL, shortID)
+	return result, false, err
 }
 
 // GetOriginalURL retrieves the original URL by short ID.

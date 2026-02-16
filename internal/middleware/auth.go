@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/google/uuid"
@@ -35,7 +36,7 @@ func GetUserID(ctx context.Context) (string, error) {
 	}
 	userID, ok := val.(string)
 	if !ok {
-		return "", ErrInvalidUserIDType
+		return "", fmt.Errorf("%w: %T", ErrInvalidUserIDType, val)
 	}
 	if userID == "" {
 		return "", ErrNoUserIDInContext

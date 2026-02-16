@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/google/uuid"
 	"os"
 	"path/filepath"
 	"sync"
 
 	"github.com/arsykor/go-url-shortener/internal/service"
+	"github.com/google/uuid"
 )
 
 // StorageEntry represents a single entry in the file storage
@@ -17,6 +17,8 @@ type StorageEntry struct {
 	UUID        uuid.UUID `json:"uuid"`
 	ShortURL    string    `json:"short_url"`
 	OriginalURL string    `json:"original_url"`
+	UserID      string    `json:"user_id,omitempty"`
+	IsDeleted   bool      `json:"is_deleted,omitempty"`
 }
 
 // FileURLRepository implements service.URLRepository using file storage
@@ -26,6 +28,8 @@ type FileURLRepository struct {
 	urls        map[string]string    // shortID -> originalURL
 	uuidMap     map[string]uuid.UUID // shortID -> uuid
 	reverseUrls map[string]string    // originalURL -> shortID
+	userURLs    map[string][]string  // userID -> []shortID
+	deleted     map[string]bool      // shortID -> isDeleted
 }
 
 // NewFileURLRepository creates a new file-based repository
@@ -35,6 +39,8 @@ func NewFileURLRepository(filePath string) (*FileURLRepository, error) {
 		urls:        make(map[string]string),
 		uuidMap:     make(map[string]uuid.UUID),
 		reverseUrls: make(map[string]string),
+		userURLs:    make(map[string][]string),
+		deleted:     make(map[string]bool),
 	}
 
 	// Load existing data from file
@@ -86,6 +92,12 @@ func (r *FileURLRepository) loadFromFile() error {
 		r.urls[entry.ShortURL] = entry.OriginalURL
 		r.uuidMap[entry.ShortURL] = entry.UUID
 		r.reverseUrls[entry.OriginalURL] = entry.ShortURL
+		if entry.UserID != "" {
+			r.userURLs[entry.UserID] = append(r.userURLs[entry.UserID], entry.ShortURL)
+		}
+		if entry.IsDeleted {
+			r.deleted[entry.ShortURL] = true
+		}
 	}
 
 	return nil
@@ -93,14 +105,14 @@ func (r *FileURLRepository) loadFromFile() error {
 
 // Save stores a URL mapping and persists to file
 // Returns existing shortID and true if originalURL already exists
-func (r *FileURLRepository) Save(ctx context.Context, shortID, originalURL string) (existingShortID string, conflict bool) {
+func (r *FileURLRepository) Save(ctx context.Context, shortID, originalURL, userID string) (existingShortID string, conflict bool) {
 	r.mu.Lock()
 
 	if existingShortID, exists := r.reverseUrls[originalURL]; exists {
 		r.mu.Unlock()
 		return existingShortID, true
 	}
-	
+
 	_, exists := r.uuidMap[shortID]
 	if !exists {
 		r.uuidMap[shortID] = uuid.New()
@@ -108,21 +120,39 @@ func (r *FileURLRepository) Save(ctx context.Context, shortID, originalURL strin
 
 	r.urls[shortID] = originalURL
 	r.reverseUrls[originalURL] = shortID
-
-	entries := make([]StorageEntry, 0, len(r.urls))
-	for sid, origURL := range r.urls {
-		uuid := r.uuidMap[sid]
-		entries = append(entries, StorageEntry{
-			UUID:        uuid,
-			ShortURL:    sid,
-			OriginalURL: origURL,
-		})
+	if userID != "" {
+		r.userURLs[userID] = append(r.userURLs[userID], shortID)
 	}
+
+	entries := r.buildEntries()
 
 	r.mu.Unlock()
 
 	r.writeToFile(entries)
 	return "", false
+}
+
+// buildEntries creates storage entries from current state
+func (r *FileURLRepository) buildEntries() []StorageEntry {
+	// Build reverse map: shortID -> userID
+	shortToUser := make(map[string]string)
+	for uid, shortIDs := range r.userURLs {
+		for _, sid := range shortIDs {
+			shortToUser[sid] = uid
+		}
+	}
+
+	entries := make([]StorageEntry, 0, len(r.urls))
+	for sid, origURL := range r.urls {
+		entries = append(entries, StorageEntry{
+			UUID:        r.uuidMap[sid],
+			ShortURL:    sid,
+			OriginalURL: origURL,
+			UserID:      shortToUser[sid],
+			IsDeleted:   r.deleted[sid],
+		})
+	}
+	return entries
 }
 
 // writeToFile writes entries to file (called without lock)
@@ -147,16 +177,20 @@ func (r *FileURLRepository) writeToFile(entries []StorageEntry) error {
 	return nil
 }
 
-// Get retrieves the original URL by short ID
-func (r *FileURLRepository) Get(ctx context.Context, shortID string) (string, bool) {
+// Get retrieves the original URL by short ID.
+// Returns originalURL, isDeleted flag, and whether the record exists.
+func (r *FileURLRepository) Get(ctx context.Context, shortID string) (string, bool, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	url, exists := r.urls[shortID]
-	return url, exists
+	if !exists {
+		return "", false, false
+	}
+	return url, r.deleted[shortID], true
 }
 
 // SaveBatch stores multiple URL mappings in a single operation
-func (r *FileURLRepository) SaveBatch(ctx context.Context, items []service.BatchItem) error {
+func (r *FileURLRepository) SaveBatch(ctx context.Context, items []service.BatchItem, userID string) error {
 	if len(items) == 0 {
 		return nil
 	}
@@ -169,18 +203,58 @@ func (r *FileURLRepository) SaveBatch(ctx context.Context, items []service.Batch
 			r.uuidMap[item.ShortID] = uuid.New()
 		}
 		r.urls[item.ShortID] = item.OriginalURL
+		if userID != "" {
+			r.userURLs[userID] = append(r.userURLs[userID], item.ShortID)
+		}
 	}
 
-	entries := make([]StorageEntry, 0, len(r.urls))
-	for sid, origURL := range r.urls {
-		uuid := r.uuidMap[sid]
-		entries = append(entries, StorageEntry{
-			UUID:        uuid,
-			ShortURL:    sid,
-			OriginalURL: origURL,
-		})
+	entries := r.buildEntries()
+
+	r.mu.Unlock()
+
+	return r.writeToFile(entries)
+}
+
+// GetURLsByUser returns all URLs shortened by a specific user
+func (r *FileURLRepository) GetURLsByUser(ctx context.Context, userID string) ([]service.UserURL, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	shortIDs := r.userURLs[userID]
+	if len(shortIDs) == 0 {
+		return nil, nil
 	}
 
+	result := make([]service.UserURL, 0, len(shortIDs))
+	for _, shortID := range shortIDs {
+		if originalURL, exists := r.urls[shortID]; exists {
+			result = append(result, service.UserURL{
+				ShortURL:    shortID,
+				OriginalURL: originalURL,
+			})
+		}
+	}
+	return result, nil
+}
+
+// DeleteURLs marks URLs as deleted.
+// Only URLs belonging to the given userID are affected.
+func (r *FileURLRepository) DeleteURLs(ctx context.Context, shortIDs []string, userID string) error {
+	r.mu.Lock()
+
+	// Build a set of shortIDs owned by this user
+	owned := make(map[string]bool)
+	for _, sid := range r.userURLs[userID] {
+		owned[sid] = true
+	}
+
+	for _, sid := range shortIDs {
+		if owned[sid] {
+			r.deleted[sid] = true
+		}
+	}
+
+	entries := r.buildEntries()
 	r.mu.Unlock()
 
 	return r.writeToFile(entries)

@@ -1,0 +1,2 @@
+ALTER TABLE url_shortener ADD COLUMN IF NOT EXISTS user_id VARCHAR(36) DEFAULT '';
+

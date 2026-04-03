@@ -163,7 +163,9 @@ func ExampleShortener_handleGetUserURLs() {
 	postW := httptest.NewRecorder()
 	r.ServeHTTP(postW, postReq)
 
-	authCookie := postW.Result().Cookies()
+	postResult := postW.Result()
+	defer postResult.Body.Close()
+	authCookie := postResult.Cookies()
 
 	// List URLs using the same identity.
 	listReq := httptest.NewRequest(http.MethodGet, "/api/user/urls", nil)
@@ -202,7 +204,9 @@ func ExampleShortener_handleDeleteUserURLs() {
 
 	shortURL := strings.TrimSpace(postW.Body.String())
 	shortID := strings.TrimPrefix(shortURL, "http://localhost:8080/")
-	authCookie := postW.Result().Cookies()
+	postResult := postW.Result()
+	defer postResult.Body.Close()
+	authCookie := postResult.Cookies()
 
 	// Request deletion of the short URL.
 	body := fmt.Sprintf(`["%s"]`, shortID)

@@ -10,7 +10,7 @@ import (
 )
 
 type AuditEvent struct {
-	Ts     int64  `json:"ts"`
+	TS     int64  `json:"ts"`
 	Action string `json:"action"`
 	UserID string `json:"user_id,omitempty"`
 	URL    string `json:"url"`
@@ -88,7 +88,7 @@ func (s *Service) Notify(action, userID, originalURL string) {
 	}
 
 	event := AuditEvent{
-		Ts:     time.Now().Unix(),
+		TS:     time.Now().Unix(),
 		Action: action,
 		UserID: userID,
 		URL:    originalURL,

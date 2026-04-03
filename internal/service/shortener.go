@@ -1,3 +1,4 @@
+// Package service implements URL shortening over a pluggable URLRepository.
 package service
 
 import (
@@ -17,6 +18,7 @@ var (
 	ErrURLDeleted  = errors.New("url has been deleted")
 )
 
+// ShortenerService creates and resolves short links.
 type ShortenerService struct {
 	repo     URLRepository
 	baseURL  string
@@ -24,6 +26,7 @@ type ShortenerService struct {
 	deleteCh chan DeleteTask
 }
 
+// URLRepository is the storage interface; implementations must be goroutine-safe.
 type URLRepository interface {
 	Save(ctx context.Context, shortID, originalURL, userID string) (existingShortID string, conflict bool)
 	Get(ctx context.Context, shortID string) (originalURL string, isDeleted bool, exists bool)
@@ -50,6 +53,7 @@ type DeleteTask struct {
 	UserID  string
 }
 
+// NewShortenerService starts background delete flushing and returns the service.
 func NewShortenerService(repo URLRepository, baseURL string, logger *zap.SugaredLogger) *ShortenerService {
 	s := &ShortenerService{
 		repo:     repo,

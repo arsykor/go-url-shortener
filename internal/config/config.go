@@ -1,3 +1,6 @@
+// Package config loads application configuration from environment variables
+// and command-line flags. Environment variables take precedence over flags,
+// and flags take precedence over hard-coded defaults.
 package config
 
 import (
@@ -6,21 +9,42 @@ import (
 	"github.com/caarlos0/env/v6"
 )
 
-// Config holds application configuration
+// Config holds all application configuration values.
+// Each field can be set via the corresponding environment variable (highest priority),
+// a command-line flag, or falls back to the built-in default.
 type Config struct {
-	ServerAddress   string `env:"SERVER_ADDRESS"`
-	BaseURL         string `env:"BASE_URL"`
+	// ServerAddress is the TCP address the HTTP server listens on (flag -a, env SERVER_ADDRESS).
+	ServerAddress string `env:"SERVER_ADDRESS"`
+
+	// BaseURL is the public base URL prepended to every short ID (flag -b, env BASE_URL).
+	BaseURL string `env:"BASE_URL"`
+
+	// FileStoragePath is the path to the JSON file used for persistent storage
+	// when no database is configured (flag -f, env FILE_STORAGE_PATH).
+	// An empty value disables file storage.
 	FileStoragePath string `env:"FILE_STORAGE_PATH"`
-	DatabaseDSN     string `env:"DATABASE_DSN"`
-	AuditFile       string `env:"AUDIT_FILE"`
-	AuditURL        string `env:"AUDIT_URL"`
+
+	// DatabaseDSN is the PostgreSQL connection string (flag -d, env DATABASE_DSN).
+	// An empty value disables database storage.
+	DatabaseDSN string `env:"DATABASE_DSN"`
+
+	// AuditFile is the path to the audit log file (flag --audit-file, env AUDIT_FILE).
+	// Audit events are appended as JSON lines. An empty value disables this sink.
+	AuditFile string `env:"AUDIT_FILE"`
+
+	// AuditURL is the URL of a remote audit server (flag --audit-url, env AUDIT_URL).
+	// Audit events are POSTed as JSON. An empty value disables this sink.
+	AuditURL string `env:"AUDIT_URL"`
 }
 
+// Load reads configuration in priority order: environment variables > flags > defaults.
+// It must be called once at program startup, before any flags are parsed elsewhere.
 func Load() *Config {
 	cfg := &Config{}
 
 	env.Parse(cfg)
 
+	// Capture env values before flag.Parse() overwrites cfg fields with flag defaults.
 	envServerAddress := cfg.ServerAddress
 	envBaseURL := cfg.BaseURL
 	envFileStoragePath := cfg.FileStoragePath
@@ -37,7 +61,7 @@ func Load() *Config {
 
 	flag.Parse()
 
-	// Priority: env > flag > default
+	// Restore env values — they win over any flag defaults.
 	if envServerAddress != "" {
 		cfg.ServerAddress = envServerAddress
 	}

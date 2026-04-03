@@ -12,7 +12,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// StorageEntry represents a single entry in the file storage
+// StorageEntry represents a single entry in the file storage.
 type StorageEntry struct {
 	UUID        uuid.UUID `json:"uuid"`
 	ShortURL    string    `json:"short_url"`
@@ -21,7 +21,7 @@ type StorageEntry struct {
 	IsDeleted   bool      `json:"is_deleted,omitempty"`
 }
 
-// FileURLRepository implements service.URLRepository using file storage
+// FileURLRepository implements service.URLRepository using file storage.
 type FileURLRepository struct {
 	mu          sync.RWMutex
 	filePath    string
@@ -32,7 +32,7 @@ type FileURLRepository struct {
 	deleted     map[string]bool      // shortID -> isDeleted
 }
 
-// NewFileURLRepository creates a new file-based repository
+// NewFileURLRepository creates a new file-based repository.
 func NewFileURLRepository(filePath string) (*FileURLRepository, error) {
 	repo := &FileURLRepository{
 		filePath:    filePath,

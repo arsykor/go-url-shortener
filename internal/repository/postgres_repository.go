@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
 
 	"github.com/arsykor/go-url-shortener/internal/service"
@@ -142,19 +143,20 @@ func (r *PostgresURLRepository) DeleteURLs(ctx context.Context, shortIDs []strin
 		return nil
 	}
 
-	placeholders := make([]string, len(shortIDs))
 	args := make([]interface{}, 0, len(shortIDs)+1)
 	args = append(args, userID)
 
+	var sb strings.Builder
 	for i, id := range shortIDs {
-		placeholders[i] = fmt.Sprintf("$%d", i+2)
+		if i > 0 {
+			sb.WriteString(", ")
+		}
+		sb.WriteByte('$')
+		sb.WriteString(strconv.Itoa(i + 2))
 		args = append(args, id)
 	}
 
-	query := fmt.Sprintf(
-		`UPDATE url_shortener SET is_deleted = TRUE WHERE user_id = $1 AND short_url IN (%s)`,
-		strings.Join(placeholders, ", "),
-	)
+	query := `UPDATE url_shortener SET is_deleted = TRUE WHERE user_id = $1 AND short_url IN (` + sb.String() + `)`
 
 	_, err := r.db.ExecContext(ctx, query, args...)
 	if err != nil {

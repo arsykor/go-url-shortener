@@ -79,28 +79,28 @@ func TestHandlerShortener_Post(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := repository.NewInMemoryURLRepository()
-		svc := service.NewShortenerService(repo, "http://localhost:8080", logger)
-		handler := NewShortener(svc, nil, logger, nil)
-		r := handler.Router()
+			svc := service.NewShortenerService(repo, "http://localhost:8080", logger)
+			handler := NewShortener(svc, nil, logger, nil)
+			r := handler.Router()
 
-		req := httptest.NewRequest(tt.method, tt.path, strings.NewReader(tt.body))
-		w := httptest.NewRecorder()
+			req := httptest.NewRequest(tt.method, tt.path, strings.NewReader(tt.body))
+			w := httptest.NewRecorder()
 
-		r.ServeHTTP(w, req)
+			r.ServeHTTP(w, req)
 
-		res := w.Result()
-		defer res.Body.Close()
+			res := w.Result()
+			defer res.Body.Close()
 
-		assert.Equal(t, tt.want.code, res.StatusCode)
+			assert.Equal(t, tt.want.code, res.StatusCode)
 
-		if !tt.wantErr {
-			assert.Equal(t, tt.want.contentType, res.Header.Get("Content-Type"))
-			resBody, err := io.ReadAll(res.Body)
-			require.NoError(t, err)
-			assert.NotEmpty(t, resBody)
-			assert.Contains(t, string(resBody), "http://localhost:8080/")
-		}
-	})
+			if !tt.wantErr {
+				assert.Equal(t, tt.want.contentType, res.Header.Get("Content-Type"))
+				resBody, err := io.ReadAll(res.Body)
+				require.NoError(t, err)
+				assert.NotEmpty(t, resBody)
+				assert.Contains(t, string(resBody), "http://localhost:8080/")
+			}
+		})
 	}
 }
 

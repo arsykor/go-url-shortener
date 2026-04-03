@@ -69,4 +69,3 @@ func WithLogging(logger *zap.SugaredLogger) func(http.Handler) http.Handler {
 		})
 	}
 }
-

@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/arsykor/go-url-shortener/internal/audit"
 	"github.com/arsykor/go-url-shortener/internal/middleware"
 	"github.com/arsykor/go-url-shortener/internal/service"
 	"github.com/go-chi/chi/v5"
@@ -44,9 +45,10 @@ type userURLResponse struct {
 
 // Shortener handles HTTP requests for URL shortening
 type Shortener struct {
-	service *service.ShortenerService
-	db      DB
-	logger  *zap.SugaredLogger
+	service  *service.ShortenerService
+	db       DB
+	logger   *zap.SugaredLogger
+	auditSvc *audit.Service
 }
 
 // DB interface for database operations
@@ -54,11 +56,12 @@ type DB interface {
 	Ping() error
 }
 
-func NewShortener(service *service.ShortenerService, db DB, logger *zap.SugaredLogger) *Shortener {
+func NewShortener(service *service.ShortenerService, db DB, logger *zap.SugaredLogger, auditSvc *audit.Service) *Shortener {
 	return &Shortener{
-		service: service,
-		db:      db,
-		logger:  logger,
+		service:  service,
+		db:       db,
+		logger:   logger,
+		auditSvc: auditSvc,
 	}
 }
 
@@ -133,6 +136,8 @@ func (h *Shortener) handlePost(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusCreated)
 	}
 	w.Write([]byte(shortURL))
+
+	h.auditSvc.Notify("shorten", userID, originalURL)
 }
 
 func (h *Shortener) handleGet(w http.ResponseWriter, r *http.Request) {
@@ -154,6 +159,9 @@ func (h *Shortener) handleGet(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Location", originalURL)
 	w.WriteHeader(http.StatusTemporaryRedirect)
+
+	userID, _ := middleware.GetUserID(r.Context())
+	h.auditSvc.Notify("follow", userID, originalURL)
 }
 
 func (h *Shortener) handlePostJSON(w http.ResponseWriter, r *http.Request) {
@@ -206,6 +214,8 @@ func (h *Shortener) handlePostJSON(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
+
+	h.auditSvc.Notify("shorten", userID, originalURL)
 }
 
 func (h *Shortener) handlePostBatch(w http.ResponseWriter, r *http.Request) {

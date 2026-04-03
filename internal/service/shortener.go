@@ -63,14 +63,9 @@ func NewShortenerService(repo URLRepository, baseURL string, logger *zap.Sugared
 
 // generateShortID generates a random short ID (8 characters)
 func generateShortID() string {
-	b := make([]byte, 6)
-	rand.Read(b)
-	encoded := base64.URLEncoding.EncodeToString(b)
-	// Take first 8 characters
-	if len(encoded) >= 8 {
-		return encoded[:8]
-	}
-	return encoded
+	var b [6]byte
+	rand.Read(b[:])
+	return base64.URLEncoding.EncodeToString(b[:])[:8]
 }
 
 // ShortenURL creates a shortened URL for the given original URL.

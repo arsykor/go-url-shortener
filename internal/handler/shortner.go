@@ -13,7 +13,6 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/arsykor/go-url-shortener/internal/audit"
 	"github.com/arsykor/go-url-shortener/internal/middleware"
 	"github.com/arsykor/go-url-shortener/internal/service"
 	"github.com/go-chi/chi/v5"
@@ -53,7 +52,7 @@ type Shortener struct {
 	service  *service.ShortenerService
 	db       DB
 	logger   *zap.SugaredLogger
-	auditSvc *audit.Service
+	auditSvc AuditNotifier
 }
 
 // DB is the minimal database interface required by the health-check endpoint.
@@ -62,10 +61,16 @@ type DB interface {
 	Ping() error
 }
 
+// AuditNotifier is the interface for dispatching audit events.
+// Pass nil to NewShortener to disable audit logging.
+type AuditNotifier interface {
+	Notify(action, userID, originalURL string)
+}
+
 // NewShortener creates a Shortener handler.
 // Pass nil for db to disable the /ping health-check endpoint.
 // Pass nil for auditSvc to disable audit logging.
-func NewShortener(service *service.ShortenerService, db DB, logger *zap.SugaredLogger, auditSvc *audit.Service) *Shortener {
+func NewShortener(service *service.ShortenerService, db DB, logger *zap.SugaredLogger, auditSvc AuditNotifier) *Shortener {
 	return &Shortener{
 		service:  service,
 		db:       db,
@@ -155,7 +160,9 @@ func (h *Shortener) handlePost(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Write([]byte(shortURL))
 
-	h.auditSvc.Notify("shorten", userID, originalURL)
+	if h.auditSvc != nil {
+		h.auditSvc.Notify("shorten", userID, originalURL)
+	}
 }
 
 // handleGet handles GET /{id}.
@@ -181,8 +188,10 @@ func (h *Shortener) handleGet(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Location", originalURL)
 	w.WriteHeader(http.StatusTemporaryRedirect)
 
-	userID, _ := middleware.GetUserID(r.Context())
-	h.auditSvc.Notify("follow", userID, originalURL)
+	if h.auditSvc != nil {
+		userID, _ := middleware.GetUserID(r.Context())
+		h.auditSvc.Notify("follow", userID, originalURL)
+	}
 }
 
 // handlePostJSON handles POST /api/shorten.
@@ -239,7 +248,9 @@ func (h *Shortener) handlePostJSON(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.auditSvc.Notify("shorten", userID, originalURL)
+	if h.auditSvc != nil {
+		h.auditSvc.Notify("shorten", userID, originalURL)
+	}
 }
 
 // handlePostBatch handles POST /api/shorten/batch.

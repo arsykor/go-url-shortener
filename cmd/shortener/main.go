@@ -3,6 +3,7 @@ package main
 import (
 	"net/http"
 
+	"github.com/arsykor/go-url-shortener/internal/audit"
 	"github.com/arsykor/go-url-shortener/internal/config"
 	"github.com/arsykor/go-url-shortener/internal/database"
 	"github.com/arsykor/go-url-shortener/internal/handler"
@@ -46,8 +47,25 @@ func main() {
 		sugar.Info("Using in-memory storage")
 	}
 
+	// Observer pattern
+	var auditObservers []audit.Observer
+	if cfg.AuditFile != "" {
+		fo, err := audit.NewFileObserver(cfg.AuditFile)
+		if err != nil {
+			sugar.Fatalw("Failed to open audit file", "error", err)
+		}
+		defer fo.Close()
+		auditObservers = append(auditObservers, fo)
+		sugar.Infow("Audit file sink enabled", "path", cfg.AuditFile)
+	}
+	if cfg.AuditURL != "" {
+		auditObservers = append(auditObservers, audit.NewHTTPObserver(cfg.AuditURL))
+		sugar.Infow("Audit HTTP sink enabled", "url", cfg.AuditURL)
+	}
+	auditSvc := audit.NewService(sugar, auditObservers...)
+
 	shortenerService := service.NewShortenerService(urlRepo, cfg.BaseURL, sugar)
-	shortenerHandler := handler.NewShortener(shortenerService, db, sugar)
+	shortenerHandler := handler.NewShortener(shortenerService, db, sugar, auditSvc)
 
 	r := shortenerHandler.Router()
 

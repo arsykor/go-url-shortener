@@ -1,3 +1,4 @@
+// Package repository provides implementations of service.URLRepository (memory, file, Postgres).
 package repository
 
 import (
@@ -7,6 +8,7 @@ import (
 	"github.com/arsykor/go-url-shortener/internal/service"
 )
 
+// InMemoryURLRepository is a thread-safe in-memory implementation of service.URLRepository.
 type InMemoryURLRepository struct {
 	mu          sync.RWMutex
 	urls        map[string]string   // shortID -> originalURL
@@ -15,6 +17,7 @@ type InMemoryURLRepository struct {
 	deleted     map[string]bool     // shortID -> isDeleted
 }
 
+// NewInMemoryURLRepository creates a new in-memory repository.
 func NewInMemoryURLRepository() *InMemoryURLRepository {
 	return &InMemoryURLRepository{
 		urls:        make(map[string]string),
@@ -24,8 +27,8 @@ func NewInMemoryURLRepository() *InMemoryURLRepository {
 	}
 }
 
-// Save stores a URL mapping
-// Returns existing shortID and true if originalURL already exists
+// Save stores a URL mapping.
+// Returns existing shortID and true if originalURL already exists.
 func (r *InMemoryURLRepository) Save(ctx context.Context, shortID, originalURL, userID string) (existingShortID string, conflict bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -55,7 +58,7 @@ func (r *InMemoryURLRepository) Get(ctx context.Context, shortID string) (string
 	return url, r.deleted[shortID], true
 }
 
-// SaveBatch stores multiple URL mappings in a single operation
+// SaveBatch stores multiple URL mappings in a single operation.
 func (r *InMemoryURLRepository) SaveBatch(ctx context.Context, items []service.BatchItem, userID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -68,7 +71,7 @@ func (r *InMemoryURLRepository) SaveBatch(ctx context.Context, items []service.B
 	return nil
 }
 
-// GetURLsByUser returns all URLs shortened by a specific user
+// GetURLsByUser returns all URLs shortened by a specific user.
 func (r *InMemoryURLRepository) GetURLsByUser(ctx context.Context, userID string) ([]service.UserURL, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

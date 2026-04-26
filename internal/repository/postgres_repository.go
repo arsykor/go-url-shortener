@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
 
 	"github.com/arsykor/go-url-shortener/internal/service"
@@ -13,20 +14,20 @@ import (
 	"github.com/lib/pq"
 )
 
-// PostgresURLRepository implements service.URLRepository using PostgreSQL
+// PostgresURLRepository implements service.URLRepository using PostgreSQL.
 type PostgresURLRepository struct {
 	db *sql.DB
 }
 
-// NewPostgresURLRepository creates a new PostgreSQL repository
+// NewPostgresURLRepository creates a new PostgreSQL repository.
 func NewPostgresURLRepository(db *sql.DB) *PostgresURLRepository {
 	return &PostgresURLRepository{
 		db: db,
 	}
 }
 
-// Save stores a URL mapping
-// Returns existing shortID and true if originalURL already exists (conflict on original_url unique index)
+// Save stores a URL mapping.
+// Returns existing shortID and true if originalURL already exists (conflict on original_url unique index).
 func (r *PostgresURLRepository) Save(ctx context.Context, shortID, originalURL, userID string) (existingShortID string, conflict bool) {
 	// Try to insert
 	query := `
@@ -73,7 +74,7 @@ func (r *PostgresURLRepository) Get(ctx context.Context, shortID string) (string
 	return originalURL, isDeleted, true
 }
 
-// SaveBatch stores multiple URL mappings in a single transaction
+// SaveBatch stores multiple URL mappings in a single transaction.
 func (r *PostgresURLRepository) SaveBatch(ctx context.Context, items []service.BatchItem, userID string) error {
 	if len(items) == 0 {
 		return nil
@@ -110,7 +111,7 @@ func (r *PostgresURLRepository) SaveBatch(ctx context.Context, items []service.B
 	return nil
 }
 
-// GetURLsByUser returns all URLs shortened by a specific user
+// GetURLsByUser returns all URLs shortened by a specific user.
 func (r *PostgresURLRepository) GetURLsByUser(ctx context.Context, userID string) ([]service.UserURL, error) {
 	query := `SELECT short_url, original_url FROM url_shortener WHERE user_id = $1`
 	rows, err := r.db.QueryContext(ctx, query, userID)
@@ -142,19 +143,20 @@ func (r *PostgresURLRepository) DeleteURLs(ctx context.Context, shortIDs []strin
 		return nil
 	}
 
-	placeholders := make([]string, len(shortIDs))
 	args := make([]interface{}, 0, len(shortIDs)+1)
 	args = append(args, userID)
 
+	var sb strings.Builder
 	for i, id := range shortIDs {
-		placeholders[i] = fmt.Sprintf("$%d", i+2)
+		if i > 0 {
+			sb.WriteString(", ")
+		}
+		sb.WriteByte('$')
+		sb.WriteString(strconv.Itoa(i + 2))
 		args = append(args, id)
 	}
 
-	query := fmt.Sprintf(
-		`UPDATE url_shortener SET is_deleted = TRUE WHERE user_id = $1 AND short_url IN (%s)`,
-		strings.Join(placeholders, ", "),
-	)
+	query := `UPDATE url_shortener SET is_deleted = TRUE WHERE user_id = $1 AND short_url IN (` + sb.String() + `)`
 
 	_, err := r.db.ExecContext(ctx, query, args...)
 	if err != nil {

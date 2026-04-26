@@ -86,8 +86,8 @@ func (w *contentTypeWrapper) Close() error {
 	return nil
 }
 
-// WithGzipCompression is a middleware that compresses responses using gzip
-// It only compresses content types: application/json and text/html
+// WithGzipCompression is a middleware that compresses responses using gzip.
+// It only compresses content types: application/json and text/html.
 func WithGzipCompression(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
@@ -96,16 +96,16 @@ func WithGzipCompression(next http.Handler) http.Handler {
 		}
 
 		// создаём обёртку для проверки Content-Type
-		contentTypeWrapper := &contentTypeWrapper{
+		ctw := &contentTypeWrapper{
 			ResponseWriter: w,
 		}
-		defer contentTypeWrapper.Close()
+		defer ctw.Close()
 
-		next.ServeHTTP(contentTypeWrapper, r)
+		next.ServeHTTP(ctw, r)
 	})
 }
 
-// WithGzipDecompression is a middleware that decompresses gzip-compressed requests
+// WithGzipDecompression is a middleware that decompresses gzip-compressed requests.
 func WithGzipDecompression(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.Contains(r.Header.Get("Content-Encoding"), "gzip") {

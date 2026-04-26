@@ -1,3 +1,8 @@
+// Package handler contains the HTTP handlers for the URL shortener service.
+//
+// All routes are registered on a chi.Router via Shortener.Router(). The router
+// applies gzip compression/decompression, structured request logging, and
+// cookie-based authentication middleware to every route.
 package handler
 
 import (
@@ -14,54 +19,67 @@ import (
 	"go.uber.org/zap"
 )
 
-// shortenRequest represents the JSON request body for /api/shorten
+// shortenRequest is the JSON body accepted by POST /api/shorten.
 type shortenRequest struct {
 	URL string `json:"url"`
 }
 
-// shortenResponse represents the JSON response body for /api/shorten
+// shortenResponse is the JSON body returned by POST /api/shorten.
 type shortenResponse struct {
 	Result string `json:"result"`
 }
 
-// batchRequestItem represents a single item in batch request
+// batchRequestItem is a single element of the array accepted by POST /api/shorten/batch.
 type batchRequestItem struct {
 	CorrelationID string `json:"correlation_id"`
 	OriginalURL   string `json:"original_url"`
 }
 
-// batchResponseItem represents a single item in batch response
+// batchResponseItem is a single element of the array returned by POST /api/shorten/batch.
 type batchResponseItem struct {
 	CorrelationID string `json:"correlation_id"`
 	ShortURL      string `json:"short_url"`
 }
 
-// userURLResponse represents a single URL pair in GET /api/user/urls response
+// userURLResponse is a single element of the array returned by GET /api/user/urls.
 type userURLResponse struct {
 	ShortURL    string `json:"short_url"`
 	OriginalURL string `json:"original_url"`
 }
 
-// Shortener handles HTTP requests for URL shortening
+// Shortener is the HTTP handler that exposes all URL-shortening endpoints.
 type Shortener struct {
-	service *service.ShortenerService
-	db      DB
-	logger  *zap.SugaredLogger
+	service  *service.ShortenerService
+	db       DB
+	logger   *zap.SugaredLogger
+	auditSvc AuditNotifier
 }
 
-// DB interface for database operations
+// DB is the minimal database interface required by the health-check endpoint.
 type DB interface {
+	// Ping verifies that the database connection is still alive.
 	Ping() error
 }
 
-func NewShortener(service *service.ShortenerService, db DB, logger *zap.SugaredLogger) *Shortener {
+// AuditNotifier is the interface for dispatching audit events.
+// Pass nil to NewShortener to disable audit logging.
+type AuditNotifier interface {
+	Notify(action, userID, originalURL string)
+}
+
+// NewShortener creates a Shortener handler.
+// Pass nil for db to disable the /ping health-check endpoint.
+// Pass nil for auditSvc to disable audit logging.
+func NewShortener(service *service.ShortenerService, db DB, logger *zap.SugaredLogger, auditSvc AuditNotifier) *Shortener {
 	return &Shortener{
-		service: service,
-		db:      db,
-		logger:  logger,
+		service:  service,
+		db:       db,
+		logger:   logger,
+		auditSvc: auditSvc,
 	}
 }
 
+// Router builds and returns the chi router with all routes and middleware registered.
 func (h *Shortener) Router() chi.Router {
 	r := chi.NewRouter()
 	r.Use(middleware.WithGzipDecompression)
@@ -79,6 +97,8 @@ func (h *Shortener) Router() chi.Router {
 	return r
 }
 
+// handlePing handles GET /ping.
+// Returns 200 OK when the database connection is healthy, 500 otherwise.
 func (h *Shortener) handlePing(w http.ResponseWriter, r *http.Request) {
 	if h.db == nil {
 		h.logger.Error("ping failed: database not configured")
@@ -95,10 +115,16 @@ func (h *Shortener) handlePing(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// handleGetEmpty handles GET / and always returns 400 Bad Request because a
+// short ID is required.
 func (h *Shortener) handleGetEmpty(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 }
 
+// handlePost handles POST /.
+// The request body must contain the original URL as plain text.
+// Returns 201 Created with the short URL on success, or 409 Conflict if the
+// URL was already shortened (the response body still contains the short URL).
 func (h *Shortener) handlePost(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -133,8 +159,15 @@ func (h *Shortener) handlePost(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusCreated)
 	}
 	w.Write([]byte(shortURL))
+
+	if h.auditSvc != nil {
+		h.auditSvc.Notify("shorten", userID, originalURL)
+	}
 }
 
+// handleGet handles GET /{id}.
+// Responds with 307 Temporary Redirect to the original URL, 410 Gone when the
+// URL has been deleted, or 400 Bad Request when the ID is unknown.
 func (h *Shortener) handleGet(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if id == "" {
@@ -154,8 +187,16 @@ func (h *Shortener) handleGet(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Location", originalURL)
 	w.WriteHeader(http.StatusTemporaryRedirect)
+
+	if h.auditSvc != nil {
+		userID, _ := middleware.GetUserID(r.Context())
+		h.auditSvc.Notify("follow", userID, originalURL)
+	}
 }
 
+// handlePostJSON handles POST /api/shorten.
+// Accepts {"url":"<original_url>"} and returns {"result":"<short_url>"}.
+// Returns 201 Created on success or 409 Conflict if the URL already exists.
 func (h *Shortener) handlePostJSON(w http.ResponseWriter, r *http.Request) {
 	var req shortenRequest
 
@@ -206,8 +247,15 @@ func (h *Shortener) handlePostJSON(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
+
+	if h.auditSvc != nil {
+		h.auditSvc.Notify("shorten", userID, originalURL)
+	}
 }
 
+// handlePostBatch handles POST /api/shorten/batch.
+// Accepts a JSON array of {correlation_id, original_url} objects and returns a
+// corresponding array of {correlation_id, short_url} objects with 201 Created.
 func (h *Shortener) handlePostBatch(w http.ResponseWriter, r *http.Request) {
 	var req []batchRequestItem
 
@@ -229,7 +277,7 @@ func (h *Shortener) handlePostBatch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	originalURLs := make([]string, 0, len(req))
-	correlationMap := make(map[int]string) // index -> correlation_id
+	correlationMap := make(map[int]string)
 
 	for i, item := range req {
 		originalURL := strings.TrimSpace(item.OriginalURL)
@@ -279,6 +327,9 @@ func (h *Shortener) handlePostBatch(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handleGetUserURLs handles GET /api/user/urls.
+// Returns a JSON array of all {short_url, original_url} pairs owned by the
+// authenticated user. Returns 204 No Content when the user has no URLs.
 func (h *Shortener) handleGetUserURLs(w http.ResponseWriter, r *http.Request) {
 	userID, err := middleware.GetUserID(r.Context())
 	if err != nil {
@@ -321,7 +372,9 @@ func (h *Shortener) handleGetUserURLs(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleDeleteUserURLs handles DELETE /api/user/urls
+// handleDeleteUserURLs handles DELETE /api/user/urls.
+// Accepts a JSON array of short IDs and schedules them for async deletion.
+// Returns 202 Accepted immediately without waiting for deletion to complete.
 func (h *Shortener) handleDeleteUserURLs(w http.ResponseWriter, r *http.Request) {
 	userID, err := middleware.GetUserID(r.Context())
 	if err != nil {
@@ -347,7 +400,6 @@ func (h *Shortener) handleDeleteUserURLs(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Schedule async deletion
 	h.service.DeleteUserURLs(shortIDs, userID)
 
 	w.WriteHeader(http.StatusAccepted)

@@ -1,3 +1,5 @@
+// Package database provides a thin wrapper around *sql.DB that automatically
+// runs schema migrations on first connect using the embedded migration files.
 package database
 
 import (
@@ -11,10 +13,15 @@ import (
 	_ "github.com/lib/pq"
 )
 
+// DB wraps *sql.DB with automatic schema migration support.
 type DB struct {
 	*sql.DB
 }
 
+// NewDB opens a PostgreSQL connection using the given DSN, verifies the
+// connection with a ping, and runs all pending migrations before returning
+// the ready-to-use DB. Returns an error if the DSN is empty, the connection
+// cannot be established, or a migration fails.
 func NewDB(dsn string) (*DB, error) {
 	if dsn == "" {
 		return nil, fmt.Errorf("database DSN is empty")
@@ -25,7 +32,6 @@ func NewDB(dsn string) (*DB, error) {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
-	// Test the connection
 	if err := db.Ping(); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("failed to ping database: %w", err)
@@ -39,6 +45,8 @@ func NewDB(dsn string) (*DB, error) {
 	return &DB{DB: db}, nil
 }
 
+// runMigrations applies all pending "up" migrations embedded in the migrations
+// package. It is a no-op when the schema is already up to date.
 func runMigrations(db *sql.DB) error {
 	migrationsDir := migrations.FS
 

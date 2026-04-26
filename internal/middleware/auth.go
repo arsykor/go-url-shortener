@@ -1,3 +1,4 @@
+// Package middleware provides reusable HTTP middleware for the URL shortener.
 package middleware
 
 import (
@@ -57,10 +58,9 @@ func buildCookieValue(userID string) string {
 	return userID + "|" + signature
 }
 
-// parseCookieValue parses and verifies a signed cookie value
-// Returns the userID if valid, empty string otherwise
+// parseCookieValue parses and verifies a signed cookie value.
+// Returns the userID if valid, empty string otherwise.
 func parseCookieValue(cookieValue string) string {
-	// Find the separator
 	for i := len(cookieValue) - 1; i >= 0; i-- {
 		if cookieValue[i] == '|' {
 			userID := cookieValue[:i]
@@ -81,13 +81,11 @@ func WithAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var userID string
 
-		// Try to read existing cookie
 		cookie, err := r.Cookie(cookieName)
 		if err == nil {
 			userID = parseCookieValue(cookie.Value)
 		}
 
-		// If no valid user ID, generate a new one
 		if userID == "" {
 			userID = uuid.New().String()
 			http.SetCookie(w, &http.Cookie{
@@ -97,7 +95,6 @@ func WithAuth(next http.Handler) http.Handler {
 			})
 		}
 
-		// Put user ID into context
 		ctx := context.WithValue(r.Context(), UserIDKey, userID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 
@@ -13,7 +14,27 @@ import (
 	"go.uber.org/zap"
 )
 
+// Build metadata injected at link time via -ldflags:
+//
+//	go build -ldflags "-X main.buildVersion=1.2.3 -X main.buildDate=2026-04-26 -X main.buildCommit=abc123"
+var (
+	buildVersion string
+	buildDate    string
+	buildCommit  string
+)
+
+func na(s string) string {
+	if s == "" {
+		return "N/A"
+	}
+	return s
+}
+
 func main() {
+	fmt.Printf("Build version: %s\n", na(buildVersion))
+	fmt.Printf("Build date: %s\n", na(buildDate))
+	fmt.Printf("Build commit: %s\n", na(buildCommit))
+
 	logger, err := zap.NewDevelopment()
 	if err != nil {
 		log.Fatal(err)

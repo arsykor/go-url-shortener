@@ -11,7 +11,7 @@ package main
 import (
 	"golang.org/x/tools/go/analysis/singlechecker"
 
-	safeterm "github.com/arsykor/go-url-shortener/cmd/linter/safeterm"
+	"github.com/arsykor/go-url-shortener/cmd/linter/safeterm"
 )
 
 func main() {

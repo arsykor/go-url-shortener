@@ -35,22 +35,25 @@ type URLRepository interface {
 	DeleteURLs(ctx context.Context, shortIDs []string, userID string) error
 }
 
-// generate:reset
 // BatchItem represents a single item in a batch operation
+//
+//generate:reset
 type BatchItem struct {
 	ShortID     string
 	OriginalURL string
 }
 
-// generate:reset
 // UserURL represents a URL pair belonging to a user
+//
+//generate:reset
 type UserURL struct {
 	ShortURL    string
 	OriginalURL string
 }
 
-// generate:reset
 // DeleteTask represents a single URL deletion task
+//
+//generate:reset
 type DeleteTask struct {
 	ShortID string
 	UserID  string

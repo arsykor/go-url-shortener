@@ -1,5 +1,5 @@
 // Command reset scans all packages below the working directory, finds structs
-// annotated with // generate:reset, and writes a Reset() method for each one
+// annotated with //generate:reset, and writes a Reset() method for each one
 // to reset.gen.go in that package's directory.
 //
 // Usage:
@@ -19,7 +19,7 @@ import (
 	"strings"
 )
 
-const marker = "generate:reset"
+const marker = "//generate:reset"
 
 var primitiveZero = map[string]string{
 	"bool":       "false",
@@ -69,6 +69,7 @@ func processDir(dir string) error {
 		return !strings.HasSuffix(n, "_test.go") && n != "reset.gen.go"
 	}, parser.ParseComments)
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: skipping %s: %v\n", dir, err)
 		return nil
 	}
 

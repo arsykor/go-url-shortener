@@ -36,18 +36,24 @@ type URLRepository interface {
 }
 
 // BatchItem represents a single item in a batch operation
+//
+//generate:reset
 type BatchItem struct {
 	ShortID     string
 	OriginalURL string
 }
 
 // UserURL represents a URL pair belonging to a user
+//
+//generate:reset
 type UserURL struct {
 	ShortURL    string
 	OriginalURL string
 }
 
 // DeleteTask represents a single URL deletion task
+//
+//generate:reset
 type DeleteTask struct {
 	ShortID string
 	UserID  string

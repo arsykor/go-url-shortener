@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+	"log"
 	"net/http"
 
 	"github.com/arsykor/go-url-shortener/internal/audit"
@@ -12,10 +14,30 @@ import (
 	"go.uber.org/zap"
 )
 
+// Build metadata injected at link time via -ldflags:
+//
+//	go build -ldflags "-X main.buildVersion=1.2.3 -X main.buildDate=2026-04-26 -X main.buildCommit=abc123"
+var (
+	buildVersion string
+	buildDate    string
+	buildCommit  string
+)
+
+func valueOrNA(s string) string {
+	if s == "" {
+		return "N/A"
+	}
+	return s
+}
+
 func main() {
+	fmt.Printf("Build version: %s\n", valueOrNA(buildVersion))
+	fmt.Printf("Build date: %s\n", valueOrNA(buildDate))
+	fmt.Printf("Build commit: %s\n", valueOrNA(buildCommit))
+
 	logger, err := zap.NewDevelopment()
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 	defer logger.Sync()
 

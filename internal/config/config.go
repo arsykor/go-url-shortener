@@ -1,17 +1,19 @@
-// Package config loads application configuration from environment variables
-// and command-line flags. Environment variables take precedence over flags,
-// and flags take precedence over hard-coded defaults.
+// Package config loads application configuration from environment variables,
+// command-line flags, and an optional JSON config file.
+// Priority (highest → lowest): env vars > flags > JSON file > built-in defaults.
 package config
 
 import (
+	"encoding/json"
 	"flag"
+	"os"
 
 	"github.com/caarlos0/env/v6"
 )
 
 // Config holds all application configuration values.
 // Each field can be set via the corresponding environment variable (highest priority),
-// a command-line flag, or falls back to the built-in default.
+// a command-line flag, a JSON config file, or falls back to the built-in default.
 type Config struct {
 	// ServerAddress is the TCP address the HTTP server listens on (flag -a, env SERVER_ADDRESS).
 	ServerAddress string `env:"SERVER_ADDRESS"`
@@ -41,14 +43,38 @@ type Config struct {
 	EnableHTTPS bool `env:"ENABLE_HTTPS"`
 }
 
-// Load reads configuration in priority order: environment variables > flags > defaults.
+// fileConfig mirrors Config for JSON unmarshalling.
+// Pointer fields let us distinguish "absent" from a zero value.
+type fileConfig struct {
+	ServerAddress   string `json:"server_address"`
+	BaseURL         string `json:"base_url"`
+	FileStoragePath string `json:"file_storage_path"`
+	DatabaseDSN     string `json:"database_dsn"`
+	AuditFile       string `json:"audit_file"`
+	AuditURL        string `json:"audit_url"`
+	EnableHTTPS     *bool  `json:"enable_https"`
+}
+
+// loadFileConfig reads and parses a JSON config file. Returns a zero fileConfig on error.
+func loadFileConfig(path string) fileConfig {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fileConfig{}
+	}
+	var fc fileConfig
+	if err = json.Unmarshal(data, &fc); err != nil {
+		return fileConfig{}
+	}
+	return fc
+}
+
+// Load reads configuration in priority order: env vars > flags > JSON file > defaults.
 // It must be called once at program startup, before any flags are parsed elsewhere.
 func Load() *Config {
 	cfg := &Config{}
 
 	env.Parse(cfg)
 
-	// Capture env values before flag.Parse() overwrites cfg fields with flag defaults.
 	envServerAddress := cfg.ServerAddress
 	envBaseURL := cfg.BaseURL
 	envFileStoragePath := cfg.FileStoragePath
@@ -57,6 +83,9 @@ func Load() *Config {
 	envAuditURL := cfg.AuditURL
 	envEnableHTTPS := cfg.EnableHTTPS
 
+	envConfigFile := os.Getenv("CONFIG")
+	var flagConfigFile string
+
 	flag.StringVar(&cfg.ServerAddress, "a", "localhost:8080", "HTTP server address")
 	flag.StringVar(&cfg.BaseURL, "b", "http://localhost:8080", "Base URL for shortened URLs")
 	flag.StringVar(&cfg.FileStoragePath, "f", "/tmp/shortener-db.json", "File storage path")
@@ -64,30 +93,61 @@ func Load() *Config {
 	flag.StringVar(&cfg.AuditFile, "audit-file", "", "Path to audit log file (disabled if empty)")
 	flag.StringVar(&cfg.AuditURL, "audit-url", "", "URL of remote audit server (disabled if empty)")
 	flag.BoolVar(&cfg.EnableHTTPS, "s", false, "Enable HTTPS with a self-signed certificate")
+	flag.StringVar(&flagConfigFile, "c", "", "Path to JSON config file")
+	flag.StringVar(&flagConfigFile, "config", "", "Path to JSON config file")
 
 	flag.Parse()
 
-	// Restore env values — they win over any flag defaults.
+	explicit := make(map[string]bool)
+	flag.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
+
+	configPath := envConfigFile
+	if configPath == "" {
+		configPath = flagConfigFile
+	}
+	fc := loadFileConfig(configPath)
+
 	if envServerAddress != "" {
 		cfg.ServerAddress = envServerAddress
+	} else if !explicit["a"] && fc.ServerAddress != "" {
+		cfg.ServerAddress = fc.ServerAddress
 	}
+
 	if envBaseURL != "" {
 		cfg.BaseURL = envBaseURL
+	} else if !explicit["b"] && fc.BaseURL != "" {
+		cfg.BaseURL = fc.BaseURL
 	}
+
 	if envFileStoragePath != "" {
 		cfg.FileStoragePath = envFileStoragePath
+	} else if !explicit["f"] && fc.FileStoragePath != "" {
+		cfg.FileStoragePath = fc.FileStoragePath
 	}
+
 	if envDatabaseDSN != "" {
 		cfg.DatabaseDSN = envDatabaseDSN
+	} else if !explicit["d"] && fc.DatabaseDSN != "" {
+		cfg.DatabaseDSN = fc.DatabaseDSN
 	}
+
 	if envAuditFile != "" {
 		cfg.AuditFile = envAuditFile
+	} else if !explicit["audit-file"] && fc.AuditFile != "" {
+		cfg.AuditFile = fc.AuditFile
 	}
+
 	if envAuditURL != "" {
 		cfg.AuditURL = envAuditURL
+	} else if !explicit["audit-url"] && fc.AuditURL != "" {
+		cfg.AuditURL = fc.AuditURL
 	}
+
+	// Bool field: *bool in fileConfig distinguishes absent from false.
 	if envEnableHTTPS {
 		cfg.EnableHTTPS = true
+	} else if !explicit["s"] && fc.EnableHTTPS != nil {
+		cfg.EnableHTTPS = *fc.EnableHTTPS
 	}
 
 	return cfg

@@ -35,6 +35,10 @@ type Config struct {
 	// AuditURL is the URL of a remote audit server (flag --audit-url, env AUDIT_URL).
 	// Audit events are POSTed as JSON. An empty value disables this sink.
 	AuditURL string `env:"AUDIT_URL"`
+
+	// EnableHTTPS starts the server in TLS mode using a self-signed certificate
+	// (flag -s, env ENABLE_HTTPS).
+	EnableHTTPS bool `env:"ENABLE_HTTPS"`
 }
 
 // Load reads configuration in priority order: environment variables > flags > defaults.
@@ -51,6 +55,7 @@ func Load() *Config {
 	envDatabaseDSN := cfg.DatabaseDSN
 	envAuditFile := cfg.AuditFile
 	envAuditURL := cfg.AuditURL
+	envEnableHTTPS := cfg.EnableHTTPS
 
 	flag.StringVar(&cfg.ServerAddress, "a", "localhost:8080", "HTTP server address")
 	flag.StringVar(&cfg.BaseURL, "b", "http://localhost:8080", "Base URL for shortened URLs")
@@ -58,6 +63,7 @@ func Load() *Config {
 	flag.StringVar(&cfg.DatabaseDSN, "d", "", "Database connection string (DSN)")
 	flag.StringVar(&cfg.AuditFile, "audit-file", "", "Path to audit log file (disabled if empty)")
 	flag.StringVar(&cfg.AuditURL, "audit-url", "", "URL of remote audit server (disabled if empty)")
+	flag.BoolVar(&cfg.EnableHTTPS, "s", false, "Enable HTTPS with a self-signed certificate")
 
 	flag.Parse()
 
@@ -79,6 +85,9 @@ func Load() *Config {
 	}
 	if envAuditURL != "" {
 		cfg.AuditURL = envAuditURL
+	}
+	if envEnableHTTPS {
+		cfg.EnableHTTPS = true
 	}
 
 	return cfg

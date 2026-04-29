@@ -91,11 +91,19 @@ func main() {
 
 	r := shortenerHandler.Router()
 
-	sugar.Infow(
-		"Starting server",
-		"addr", cfg.ServerAddress,
-	)
-	if err := http.ListenAndServe(cfg.ServerAddress, r); err != nil {
-		sugar.Fatalw(err.Error(), "event", "start server")
+	if cfg.EnableHTTPS {
+		certFile, keyFile, err := generateTLSFiles()
+		if err != nil {
+			sugar.Fatalw("Failed to generate TLS certificate", "error", err)
+		}
+		sugar.Infow("Starting HTTPS server", "addr", cfg.ServerAddress)
+		if err := http.ListenAndServeTLS(cfg.ServerAddress, certFile, keyFile, r); err != nil {
+			sugar.Fatalw(err.Error(), "event", "start server")
+		}
+	} else {
+		sugar.Infow("Starting HTTP server", "addr", cfg.ServerAddress)
+		if err := http.ListenAndServe(cfg.ServerAddress, r); err != nil {
+			sugar.Fatalw(err.Error(), "event", "start server")
+		}
 	}
 }

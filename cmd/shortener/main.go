@@ -47,7 +47,10 @@ func main() {
 	defer logger.Sync()
 
 	sugar := logger.Sugar()
-	cfg := config.Load()
+	cfg, err := config.Load()
+	if err != nil {
+		sugar.Fatalw("Failed to load config", "error", err)
+	}
 
 	// Priority: DATABASE_DSN > FILE_STORAGE_PATH > in-memory
 	var urlRepo service.URLRepository
@@ -101,16 +104,22 @@ func main() {
 		Handler: r,
 	}
 
+	// Initialise TLS synchronously (before go func()).
+	if cfg.EnableHTTPS {
+		tlsCfg, err := selfSignedTLSConfig()
+		if err != nil {
+			sugar.Fatalw("Failed to generate TLS certificate", "error", err)
+		}
+		srv.TLSConfig = tlsCfg
+	}
+
 	// Start the server in a goroutine so we can listen for shutdown signals.
 	go func() {
 		var err error
 		if cfg.EnableHTTPS {
-			certFile, keyFile, tlsErr := generateTLSFiles()
-			if tlsErr != nil {
-				sugar.Fatalw("Failed to generate TLS certificate", "error", tlsErr)
-			}
 			sugar.Infow("Starting HTTPS server", "addr", cfg.ServerAddress)
-			err = srv.ListenAndServeTLS(certFile, keyFile)
+			// ("", "") - use cert already loaded into srv.TLSConfig
+			err = srv.ListenAndServeTLS("", "")
 		} else {
 			sugar.Infow("Starting HTTP server", "addr", cfg.ServerAddress)
 			err = srv.ListenAndServe()

@@ -6,6 +6,7 @@ package config
 import (
 	"encoding/json"
 	"flag"
+	"fmt"
 	"os"
 
 	"github.com/caarlos0/env/v6"
@@ -55,22 +56,22 @@ type fileConfig struct {
 	EnableHTTPS     *bool  `json:"enable_https"`
 }
 
-// loadFileConfig reads and parses a JSON config file. Returns a zero fileConfig on error.
-func loadFileConfig(path string) fileConfig {
+// loadFileConfig reads and parses a JSON config file.
+func loadFileConfig(path string) (fileConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return fileConfig{}
+		return fileConfig{}, err
 	}
 	var fc fileConfig
 	if err = json.Unmarshal(data, &fc); err != nil {
-		return fileConfig{}
+		return fileConfig{}, err
 	}
-	return fc
+	return fc, nil
 }
 
 // Load reads configuration in priority order: env vars > flags > JSON file > defaults.
 // It must be called once at program startup, before any flags are parsed elsewhere.
-func Load() *Config {
+func Load() (*Config, error) {
 	cfg := &Config{}
 
 	env.Parse(cfg)
@@ -105,7 +106,14 @@ func Load() *Config {
 	if configPath == "" {
 		configPath = flagConfigFile
 	}
-	fc := loadFileConfig(configPath)
+	var fc fileConfig
+	if configPath != "" {
+		var err error
+		fc, err = loadFileConfig(configPath)
+		if err != nil {
+			return nil, fmt.Errorf("config file %q: %w", configPath, err)
+		}
+	}
 
 	if envServerAddress != "" {
 		cfg.ServerAddress = envServerAddress
@@ -150,5 +158,5 @@ func Load() *Config {
 		cfg.EnableHTTPS = *fc.EnableHTTPS
 	}
 
-	return cfg
+	return cfg, nil
 }

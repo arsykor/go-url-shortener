@@ -4,19 +4,23 @@ import (
 	"bytes"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"math/big"
 	"net"
-	"os"
-	"path/filepath"
 	"time"
 )
 
-// generateTLSFiles creates a self-signed certificate and RSA private key,
-// writes them to ~/cert.pem and ~/private.pem, and returns their paths.
-func generateTLSFiles() (certFile, keyFile string, err error) {
+// selfSignedTLSConfig generates a self-signed RSA certificate in memory
+// and returns a *tls.Config ready for use with http.Server.
+func selfSignedTLSConfig() (*tls.Config, error) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, 4096)
+	if err != nil {
+		return nil, err
+	}
+
 	cert := &x509.Certificate{
 		SerialNumber: big.NewInt(1658),
 		Subject: pkix.Name{
@@ -31,43 +35,26 @@ func generateTLSFiles() (certFile, keyFile string, err error) {
 		KeyUsage:     x509.KeyUsageDigitalSignature,
 	}
 
-	privateKey, err := rsa.GenerateKey(rand.Reader, 4096)
+	certDER, err := x509.CreateCertificate(rand.Reader, cert, cert, &privateKey.PublicKey, privateKey)
 	if err != nil {
-		return "", "", err
+		return nil, err
 	}
 
-	certBytes, err := x509.CreateCertificate(rand.Reader, cert, cert, &privateKey.PublicKey, privateKey)
-	if err != nil {
-		return "", "", err
+	var certPEM, keyPEM bytes.Buffer
+	if err = pem.Encode(&certPEM, &pem.Block{Type: "CERTIFICATE", Bytes: certDER}); err != nil {
+		return nil, err
 	}
-
-	var certPEM bytes.Buffer
-	if err = pem.Encode(&certPEM, &pem.Block{Type: "CERTIFICATE", Bytes: certBytes}); err != nil {
-		return "", "", err
-	}
-
-	var privateKeyPEM bytes.Buffer
-	if err = pem.Encode(&privateKeyPEM, &pem.Block{
+	if err = pem.Encode(&keyPEM, &pem.Block{
 		Type:  "RSA PRIVATE KEY",
 		Bytes: x509.MarshalPKCS1PrivateKey(privateKey),
 	}); err != nil {
-		return "", "", err
+		return nil, err
 	}
 
-	homeDir, err := os.UserHomeDir()
+	tlsCert, err := tls.X509KeyPair(certPEM.Bytes(), keyPEM.Bytes())
 	if err != nil {
-		return "", "", err
+		return nil, err
 	}
 
-	certFile = filepath.Join(homeDir, "cert.pem")
-	keyFile = filepath.Join(homeDir, "private.pem")
-
-	if err = os.WriteFile(certFile, certPEM.Bytes(), 0644); err != nil {
-		return "", "", err
-	}
-	if err = os.WriteFile(keyFile, privateKeyPEM.Bytes(), 0600); err != nil {
-		return "", "", err
-	}
-
-	return certFile, keyFile, nil
+	return &tls.Config{Certificates: []tls.Certificate{tlsCert}}, nil
 }

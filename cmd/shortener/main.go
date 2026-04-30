@@ -1,9 +1,14 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/arsykor/go-url-shortener/internal/audit"
 	"github.com/arsykor/go-url-shortener/internal/config"
@@ -42,7 +47,10 @@ func main() {
 	defer logger.Sync()
 
 	sugar := logger.Sugar()
-	cfg := config.Load()
+	cfg, err := config.Load()
+	if err != nil {
+		sugar.Fatalw("Failed to load config", "error", err)
+	}
 
 	// Priority: DATABASE_DSN > FILE_STORAGE_PATH > in-memory
 	var urlRepo service.URLRepository
@@ -91,11 +99,47 @@ func main() {
 
 	r := shortenerHandler.Router()
 
-	sugar.Infow(
-		"Starting server",
-		"addr", cfg.ServerAddress,
-	)
-	if err := http.ListenAndServe(cfg.ServerAddress, r); err != nil {
-		sugar.Fatalw(err.Error(), "event", "start server")
+	srv := &http.Server{
+		Addr:    cfg.ServerAddress,
+		Handler: r,
 	}
+
+	// Initialise TLS synchronously (before go func()).
+	if cfg.EnableHTTPS {
+		tlsCfg, err := selfSignedTLSConfig()
+		if err != nil {
+			sugar.Fatalw("Failed to generate TLS certificate", "error", err)
+		}
+		srv.TLSConfig = tlsCfg
+	}
+
+	// Start the server in a goroutine so we can listen for shutdown signals.
+	go func() {
+		var err error
+		if cfg.EnableHTTPS {
+			sugar.Infow("Starting HTTPS server", "addr", cfg.ServerAddress)
+			// ("", "") - use cert already loaded into srv.TLSConfig
+			err = srv.ListenAndServeTLS("", "")
+		} else {
+			sugar.Infow("Starting HTTP server", "addr", cfg.ServerAddress)
+			err = srv.ListenAndServe()
+		}
+		if err != nil && err != http.ErrServerClosed {
+			sugar.Fatalw(err.Error(), "event", "start server")
+		}
+	}()
+
+	// Block until a shutdown signal is received.
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
+	sig := <-quit
+	sugar.Infow("Received signal, shutting down", "signal", sig)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(ctx); err != nil {
+		sugar.Warnw("Server forced to shutdown", "error", err)
+	}
+	sugar.Info("Server stopped")
 }

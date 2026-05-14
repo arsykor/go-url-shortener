@@ -34,11 +34,13 @@ func TestServer_ShortenAndList(t *testing.T) {
 	go func() { _ = gs.Serve(buf) }()
 	t.Cleanup(func() { gs.Stop() })
 
-	conn, err := grpc.DialContext(context.Background(), "bufnet",
+	conn, err := grpc.NewClient(
+		"passthrough:///bufnet",
 		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) {
 			return buf.Dial()
 		}),
-		grpc.WithTransportCredentials(insecure.NewCredentials()))
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = conn.Close() })
 

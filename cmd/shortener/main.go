@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -95,7 +97,15 @@ func main() {
 	auditSvc := audit.NewService(sugar, auditObservers...)
 
 	shortenerService := service.NewShortenerService(urlRepo, cfg.BaseURL, sugar)
-	shortenerHandler := handler.NewShortener(shortenerService, db, sugar, auditSvc)
+	var trustedSubnet *net.IPNet
+	if cidr := strings.TrimSpace(cfg.TrustedSubnet); cidr != "" {
+		_, n, err := net.ParseCIDR(cidr)
+		if err != nil {
+			sugar.Fatalw("invalid trusted_subnet (CIDR)", "value", cidr, "error", err)
+		}
+		trustedSubnet = n
+	}
+	shortenerHandler := handler.NewShortener(shortenerService, db, sugar, auditSvc, trustedSubnet)
 
 	r := shortenerHandler.Router()
 

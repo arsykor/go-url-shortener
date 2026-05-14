@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -47,12 +48,19 @@ type userURLResponse struct {
 	OriginalURL string `json:"original_url"`
 }
 
+// statsResponse is the JSON returned by GET /api/internal/stats.
+type statsResponse struct {
+	URLs  int `json:"urls"`
+	Users int `json:"users"`
+}
+
 // Shortener is the HTTP handler that exposes all URL-shortening endpoints.
 type Shortener struct {
-	service  *service.ShortenerService
-	db       DB
-	logger   *zap.SugaredLogger
-	auditSvc AuditNotifier
+	service            *service.ShortenerService
+	db                 DB
+	logger             *zap.SugaredLogger
+	auditSvc           AuditNotifier
+	trustedSubnetIPNet *net.IPNet
 }
 
 // DB is the minimal database interface required by the health-check endpoint.
@@ -70,12 +78,14 @@ type AuditNotifier interface {
 // NewShortener creates a Shortener handler.
 // Pass nil for db to disable the /ping health-check endpoint.
 // Pass nil for auditSvc to disable audit logging.
-func NewShortener(service *service.ShortenerService, db DB, logger *zap.SugaredLogger, auditSvc AuditNotifier) *Shortener {
+// Pass nil for trustedSubnetIPNet to forbid every caller of GET /api/internal/stats.
+func NewShortener(service *service.ShortenerService, db DB, logger *zap.SugaredLogger, auditSvc AuditNotifier, trustedSubnetIPNet *net.IPNet) *Shortener {
 	return &Shortener{
-		service:  service,
-		db:       db,
-		logger:   logger,
-		auditSvc: auditSvc,
+		service:            service,
+		db:                 db,
+		logger:             logger,
+		auditSvc:           auditSvc,
+		trustedSubnetIPNet: trustedSubnetIPNet,
 	}
 }
 
@@ -92,9 +102,30 @@ func (h *Shortener) Router() chi.Router {
 	r.Post("/api/shorten/batch", h.handlePostBatch)
 	r.Get("/api/user/urls", h.handleGetUserURLs)
 	r.Delete("/api/user/urls", h.handleDeleteUserURLs)
+	r.Get("/api/internal/stats", h.handleInternalStats)
 	r.Get("/", h.handleGetEmpty)
 	r.Get("/{id}", h.handleGet)
 	return r
+}
+
+func parseXRealIP(s string) (net.IP, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil, false
+	}
+	if i := strings.IndexByte(s, ','); i >= 0 {
+		s = strings.TrimSpace(s[:i])
+	}
+	if ip := net.ParseIP(s); ip != nil {
+		return ip, true
+	}
+	host, _, err := net.SplitHostPort(s)
+	if err == nil {
+		if ip := net.ParseIP(host); ip != nil {
+			return ip, true
+		}
+	}
+	return nil, false
 }
 
 // handlePing handles GET /ping.
@@ -113,6 +144,30 @@ func (h *Shortener) handlePing(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
+}
+
+// handleInternalStats handles GET /api/internal/stats for trusted subnets only (header X-Real-IP).
+func (h *Shortener) handleInternalStats(w http.ResponseWriter, r *http.Request) {
+	if h.trustedSubnetIPNet == nil {
+		http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
+		return
+	}
+	clientIP, ok := parseXRealIP(r.Header.Get("X-Real-IP"))
+	if !ok || !h.trustedSubnetIPNet.Contains(clientIP) {
+		http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
+		return
+	}
+	urls, users, err := h.service.Stats(r.Context())
+	if err != nil {
+		h.logger.Errorw("failed to compute stats", "error", err)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(statsResponse{URLs: urls, Users: users}); err != nil {
+		h.logger.Errorw("failed to encode stats response", "error", err)
+	}
 }
 
 // handleGetEmpty handles GET / and always returns 400 Bad Request because a

@@ -42,6 +42,10 @@ type Config struct {
 	// EnableHTTPS starts the server in TLS mode using a self-signed certificate
 	// (flag -s, env ENABLE_HTTPS).
 	EnableHTTPS bool `env:"ENABLE_HTTPS"`
+
+	// TrustedSubnet is a CIDR that may access GET /api/internal/stats via X-Real-IP check
+	// (flag -t, env TRUSTED_SUBNET). Empty string denies every request.
+	TrustedSubnet string `env:"TRUSTED_SUBNET"`
 }
 
 // fileConfig mirrors Config for JSON unmarshalling.
@@ -54,6 +58,7 @@ type fileConfig struct {
 	AuditFile       string `json:"audit_file"`
 	AuditURL        string `json:"audit_url"`
 	EnableHTTPS     *bool  `json:"enable_https"`
+	TrustedSubnet   string `json:"trusted_subnet"`
 }
 
 // loadFileConfig reads and parses a JSON config file.
@@ -83,6 +88,7 @@ func Load() (*Config, error) {
 	envAuditFile := cfg.AuditFile
 	envAuditURL := cfg.AuditURL
 	envEnableHTTPS := cfg.EnableHTTPS
+	envTrustedSubnet := cfg.TrustedSubnet
 
 	envConfigFile := os.Getenv("CONFIG")
 	var flagConfigFile string
@@ -94,6 +100,7 @@ func Load() (*Config, error) {
 	flag.StringVar(&cfg.AuditFile, "audit-file", "", "Path to audit log file (disabled if empty)")
 	flag.StringVar(&cfg.AuditURL, "audit-url", "", "URL of remote audit server (disabled if empty)")
 	flag.BoolVar(&cfg.EnableHTTPS, "s", false, "Enable HTTPS with a self-signed certificate")
+	flag.StringVar(&cfg.TrustedSubnet, "t", "", "Trusted CIDR for GET /api/internal/stats (X-Real-IP); empty forbids access")
 	flag.StringVar(&flagConfigFile, "c", "", "Path to JSON config file")
 	flag.StringVar(&flagConfigFile, "config", "", "Path to JSON config file")
 
@@ -156,6 +163,12 @@ func Load() (*Config, error) {
 		cfg.EnableHTTPS = true
 	} else if !explicit["s"] && fc.EnableHTTPS != nil {
 		cfg.EnableHTTPS = *fc.EnableHTTPS
+	}
+
+	if envTrustedSubnet != "" {
+		cfg.TrustedSubnet = envTrustedSubnet
+	} else if !explicit["t"] && fc.TrustedSubnet != "" {
+		cfg.TrustedSubnet = fc.TrustedSubnet
 	}
 
 	return cfg, nil

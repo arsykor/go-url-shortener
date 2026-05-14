@@ -33,6 +33,7 @@ type URLRepository interface {
 	SaveBatch(ctx context.Context, items []BatchItem, userID string) error
 	GetURLsByUser(ctx context.Context, userID string) ([]UserURL, error)
 	DeleteURLs(ctx context.Context, shortIDs []string, userID string) error
+	Stats(ctx context.Context) (urls int, users int, err error)
 }
 
 // BatchItem represents a single item in a batch operation
@@ -132,6 +133,11 @@ func (s *ShortenerService) ShortenURLBatch(ctx context.Context, originalURLs []s
 // GetURLsByUser returns all URLs shortened by a specific user
 func (s *ShortenerService) GetURLsByUser(ctx context.Context, userID string) ([]UserURL, error) {
 	return s.repo.GetURLsByUser(ctx, userID)
+}
+
+// Stats returns total shortened URL records and distinct users with shortened URLs.
+func (s *ShortenerService) Stats(ctx context.Context) (urls int, users int, err error) {
+	return s.repo.Stats(ctx)
 }
 
 // DeleteUserURLs accepts a list of short IDs and schedules them for async deletion.

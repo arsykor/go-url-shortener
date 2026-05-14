@@ -16,6 +16,7 @@ import (
 
 	"github.com/arsykor/go-url-shortener/internal/repository"
 	"github.com/arsykor/go-url-shortener/internal/service"
+	"github.com/arsykor/go-url-shortener/internal/urlapi"
 )
 
 func TestHandlerShortener_Post(t *testing.T) {
@@ -81,7 +82,8 @@ func TestHandlerShortener_Post(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := repository.NewInMemoryURLRepository()
 			svc := service.NewShortenerService(repo, "http://localhost:8080", logger)
-			handler := NewShortener(svc, nil, logger, nil, nil)
+			f := &urlapi.Facade{Svc: svc, Audit: nil}
+			handler := NewShortener(f, nil, logger, nil)
 			r := handler.Router()
 
 			req := httptest.NewRequest(tt.method, tt.path, strings.NewReader(tt.body))
@@ -164,7 +166,8 @@ func TestHandlerShortener_Get(t *testing.T) {
 			}
 
 			svc := service.NewShortenerService(repo, "http://localhost:8080", logger)
-			handler := NewShortener(svc, nil, logger, nil, nil)
+			f := &urlapi.Facade{Svc: svc, Audit: nil}
+			handler := NewShortener(f, nil, logger, nil)
 			r := handler.Router()
 
 			req := httptest.NewRequest(tt.method, tt.path, nil)
@@ -188,7 +191,8 @@ func TestHandlerShortener_UnsupportedMethod(t *testing.T) {
 	logger := zap.NewNop().Sugar()
 	repo := repository.NewInMemoryURLRepository()
 	svc := service.NewShortenerService(repo, "http://localhost:8080", logger)
-	handler := NewShortener(svc, nil, logger, nil, nil)
+	f := &urlapi.Facade{Svc: svc, Audit: nil}
+	handler := NewShortener(f, nil, logger, nil)
 	r := handler.Router()
 
 	req := httptest.NewRequest(http.MethodPut, "/", nil)
@@ -285,7 +289,8 @@ func TestHandlerShortener_PostJSON(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := repository.NewInMemoryURLRepository()
 			svc := service.NewShortenerService(repo, "http://localhost:8080", logger)
-			handler := NewShortener(svc, nil, logger, nil, nil)
+			f := &urlapi.Facade{Svc: svc, Audit: nil}
+			handler := NewShortener(f, nil, logger, nil)
 			r := handler.Router()
 
 			req := httptest.NewRequest(tt.method, tt.path, strings.NewReader(tt.body))
@@ -393,7 +398,8 @@ func TestHandlerShortener_InternalStats(t *testing.T) {
 				tt.setup(repo)
 			}
 			svc := service.NewShortenerService(repo, "http://localhost:8080", logger)
-			h := NewShortener(svc, nil, logger, nil, tt.trusted)
+			f := &urlapi.Facade{Svc: svc, Audit: nil}
+			h := NewShortener(f, nil, logger, tt.trusted)
 			req := httptest.NewRequest(http.MethodGet, "/api/internal/stats", nil)
 			if tt.xRealIP != "" {
 				req.Header.Set("X-Real-IP", tt.xRealIP)

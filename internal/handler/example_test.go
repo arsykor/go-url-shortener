@@ -18,7 +18,7 @@ func newExampleHandler() *Shortener {
 	repo := repository.NewInMemoryURLRepository()
 	logger := zap.NewNop().Sugar()
 	svc := service.NewShortenerService(repo, "http://localhost:8080", logger)
-	return NewShortener(svc, nil, logger, nil)
+	return NewShortener(svc, nil, logger, nil, nil)
 }
 
 // ExampleShortener_handlePost demonstrates shortening a URL via the plain-text

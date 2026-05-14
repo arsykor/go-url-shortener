@@ -259,3 +259,17 @@ func (r *FileURLRepository) DeleteURLs(ctx context.Context, shortIDs []string, u
 
 	return r.writeToFile(entries)
 }
+
+// Stats returns totals of shortened URL records and users with saved URLs (non-empty user_id).
+func (r *FileURLRepository) Stats(_ context.Context) (int, int, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	urls := len(r.urls)
+	users := 0
+	for uid := range r.userURLs {
+		if uid != "" {
+			users++
+		}
+	}
+	return urls, users, nil
+}

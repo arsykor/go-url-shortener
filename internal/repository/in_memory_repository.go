@@ -8,7 +8,6 @@ import (
 	"github.com/arsykor/go-url-shortener/internal/service"
 )
 
-// InMemoryURLRepository is a thread-safe in-memory implementation of service.URLRepository.
 type InMemoryURLRepository struct {
 	mu          sync.RWMutex
 	urls        map[string]string   // shortID -> originalURL
@@ -111,4 +110,18 @@ func (r *InMemoryURLRepository) DeleteURLs(ctx context.Context, shortIDs []strin
 		}
 	}
 	return nil
+}
+
+// Stats returns totals of shortened URL records and users with saved URLs (non-empty user_id).
+func (r *InMemoryURLRepository) Stats(_ context.Context) (int, int, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	urls := len(r.urls)
+	users := 0
+	for uid := range r.userURLs {
+		if uid != "" {
+			users++
+		}
+	}
+	return urls, users, nil
 }

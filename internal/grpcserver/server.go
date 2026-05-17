@@ -11,6 +11,7 @@ import (
 	"github.com/arsykor/go-url-shortener/internal/urlapi"
 	pb "github.com/arsykor/go-url-shortener/proto/shortenerv1"
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -18,10 +19,13 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 
+const msgInternalError = "internal server error"
+
 // Server implements shortenerv1.ShortenerServiceServer.
 type Server struct {
 	pb.UnimplementedShortenerServiceServer
 	Facade *urlapi.Facade
+	Logger *zap.SugaredLogger
 }
 
 func concatAuthorization(md metadata.MD) string {
@@ -34,12 +38,18 @@ func concatAuthorization(md metadata.MD) string {
 
 // ShortenURL mirrors POST /api/shorten.
 func (s *Server) ShortenURL(ctx context.Context, req *pb.URLShortenRequest) (*pb.URLShortenResponse, error) {
-	md, _ := metadata.FromIncomingContext(ctx)
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		md = metadata.MD{}
+	}
 	userID := middleware.UserIDFromAuthorizationHeader(concatAuthorization(md))
 	if userID == "" {
 		userID = uuid.New().String()
 		if err := grpc.SetHeader(ctx, metadata.Pairs("authorization", middleware.SignedUserToken(userID))); err != nil {
-			return nil, status.Errorf(codes.Internal, "set header: %v", err)
+			if s.Logger != nil {
+				s.Logger.Errorw("grpc SetHeader authorization failed", "error", err)
+			}
+			return nil, status.Error(codes.Internal, msgInternalError)
 		}
 	}
 	res, _, err := s.Facade.Shorten(ctx, userID, req.GetUrl())
@@ -47,9 +57,12 @@ func (s *Server) ShortenURL(ctx context.Context, req *pb.URLShortenRequest) (*pb
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "%v", err)
+		if s.Logger != nil {
+			s.Logger.Errorw("grpc ShortenURL failed", "error", err)
+		}
+		return nil, status.Error(codes.Internal, msgInternalError)
 	}
-	return &pb.URLShortenResponse{Result: res}, nil
+	return (&pb.URLShortenResponse_builder{Result: res}).Build(), nil
 }
 
 // ExpandURL mirrors GET /{id} (returns the target URL in the message).
@@ -62,14 +75,20 @@ func (s *Server) ExpandURL(ctx context.Context, req *pb.URLExpandRequest) (*pb.U
 		return nil, status.Error(codes.FailedPrecondition, "url deleted")
 	}
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "%v", err)
+		if s.Logger != nil {
+			s.Logger.Errorw("grpc ExpandURL failed", "error", err)
+		}
+		return nil, status.Error(codes.Internal, msgInternalError)
 	}
 	if s.Facade.Audit != nil {
-		md, _ := metadata.FromIncomingContext(ctx)
-		uid := middleware.UserIDFromAuthorizationHeader(concatAuthorization(md))
+		md, ok := metadata.FromIncomingContext(ctx)
+		var uid string
+		if ok {
+			uid = middleware.UserIDFromAuthorizationHeader(concatAuthorization(md))
+		}
 		s.Facade.Audit.Notify("follow", uid, orig)
 	}
-	return &pb.URLExpandResponse{Result: orig}, nil
+	return (&pb.URLExpandResponse_builder{Result: orig}).Build(), nil
 }
 
 // ListUserURLs mirrors GET /api/user/urls.
@@ -84,13 +103,19 @@ func (s *Server) ListUserURLs(ctx context.Context, _ *emptypb.Empty) (*pb.UserUR
 	}
 	list, err := s.Facade.ListUserURLsDisplay(ctx, userID)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "%v", err)
+		if s.Logger != nil {
+			s.Logger.Errorw("grpc ListUserURLs failed", "error", err)
+		}
+		return nil, status.Error(codes.Internal, msgInternalError)
 	}
-	resp := &pb.UserURLsResponse{}
+	items := make([]*pb.URLData, 0, len(list))
 	for _, u := range list {
-		resp.Url = append(resp.Url, &pb.URLData{ShortUrl: u.ShortURL, OriginalUrl: u.OriginalURL})
+		items = append(items, (&pb.URLData_builder{
+			ShortUrl:    u.ShortURL,
+			OriginalUrl: u.OriginalURL,
+		}).Build())
 	}
-	return resp, nil
+	return (&pb.UserURLsResponse_builder{Url: items}).Build(), nil
 }
 
 // Register registers the service implementation on srv.

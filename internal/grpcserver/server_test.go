@@ -28,7 +28,7 @@ func TestServer_ShortenAndList(t *testing.T) {
 	f := &urlapi.Facade{Svc: svc, Audit: nil}
 
 	gs := grpc.NewServer()
-	Register(gs, &Server{Facade: f})
+	Register(gs, &Server{Facade: f, Logger: logger})
 
 	buf := bufconn.Listen(1024 * 1024)
 	go func() { _ = gs.Serve(buf) }()
@@ -49,18 +49,21 @@ func TestServer_ShortenAndList(t *testing.T) {
 	uid := "test-user-1"
 	auth := middleware.SignedUserToken(uid)
 	shortCtx := metadata.AppendToOutgoingContext(context.Background(), "authorization", auth)
-	res, err := client.ShortenURL(shortCtx, &pb.URLShortenRequest{Url: "https://practicum.yandex.ru"})
+	shortReq := (&pb.URLShortenRequest_builder{Url: "https://practicum.yandex.ru"}).Build()
+	res, err := client.ShortenURL(shortCtx, shortReq)
 	require.NoError(t, err)
 	require.NotEmpty(t, res.GetResult())
 
 	id := strings.TrimPrefix(res.GetResult(), "http://localhost:8080/")
-	ex, err := client.ExpandURL(context.Background(), &pb.URLExpandRequest{Id: id})
+	exReq := (&pb.URLExpandRequest_builder{Id: id}).Build()
+	ex, err := client.ExpandURL(context.Background(), exReq)
 	require.NoError(t, err)
 	assert.Equal(t, "https://practicum.yandex.ru", ex.GetResult())
 
 	ctxList := metadata.AppendToOutgoingContext(context.Background(), "authorization", auth)
 	list, err := client.ListUserURLs(ctxList, &emptypb.Empty{})
 	require.NoError(t, err)
-	require.Len(t, list.GetUrl(), 1)
-	assert.Equal(t, "https://practicum.yandex.ru", list.Url[0].OriginalUrl)
+	urls := list.GetUrl()
+	require.Len(t, urls, 1)
+	assert.Equal(t, "https://practicum.yandex.ru", urls[0].GetOriginalUrl())
 }

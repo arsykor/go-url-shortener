@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/google/uuid"
 )
@@ -73,6 +74,20 @@ func parseCookieValue(cookieValue string) string {
 		}
 	}
 	return ""
+}
+
+// UserIDFromAuthorizationHeader parses the signed user token
+func UserIDFromAuthorizationHeader(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) >= 7 && strings.EqualFold(value[:7], "bearer ") {
+		value = strings.TrimSpace(value[7:])
+	}
+	return parseCookieValue(value)
+}
+
+// SignedUserToken builds the wire value for Authorization metadata (userID|signature).
+func SignedUserToken(userID string) string {
+	return buildCookieValue(userID)
 }
 
 // WithAuth is a middleware that manages user authentication via cookies.

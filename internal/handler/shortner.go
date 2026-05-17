@@ -16,6 +16,7 @@ import (
 
 	"github.com/arsykor/go-url-shortener/internal/middleware"
 	"github.com/arsykor/go-url-shortener/internal/service"
+	"github.com/arsykor/go-url-shortener/internal/urlapi"
 	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 )
@@ -56,10 +57,9 @@ type statsResponse struct {
 
 // Shortener is the HTTP handler that exposes all URL-shortening endpoints.
 type Shortener struct {
-	service            *service.ShortenerService
+	facade             *urlapi.Facade
 	db                 DB
 	logger             *zap.SugaredLogger
-	auditSvc           AuditNotifier
 	trustedSubnetIPNet *net.IPNet
 }
 
@@ -69,22 +69,14 @@ type DB interface {
 	Ping() error
 }
 
-// AuditNotifier is the interface for dispatching audit events.
-// Pass nil to NewShortener to disable audit logging.
-type AuditNotifier interface {
-	Notify(action, userID, originalURL string)
-}
-
 // NewShortener creates a Shortener handler.
 // Pass nil for db to disable the /ping health-check endpoint.
-// Pass nil for auditSvc to disable audit logging.
 // Pass nil for trustedSubnetIPNet to forbid every caller of GET /api/internal/stats.
-func NewShortener(service *service.ShortenerService, db DB, logger *zap.SugaredLogger, auditSvc AuditNotifier, trustedSubnetIPNet *net.IPNet) *Shortener {
+func NewShortener(facade *urlapi.Facade, db DB, logger *zap.SugaredLogger, trustedSubnetIPNet *net.IPNet) *Shortener {
 	return &Shortener{
-		service:            service,
+		facade:             facade,
 		db:                 db,
 		logger:             logger,
-		auditSvc:           auditSvc,
 		trustedSubnetIPNet: trustedSubnetIPNet,
 	}
 }
@@ -102,30 +94,10 @@ func (h *Shortener) Router() chi.Router {
 	r.Post("/api/shorten/batch", h.handlePostBatch)
 	r.Get("/api/user/urls", h.handleGetUserURLs)
 	r.Delete("/api/user/urls", h.handleDeleteUserURLs)
-	r.Get("/api/internal/stats", h.handleInternalStats)
+	r.With(middleware.RequireTrustedSubnet(h.trustedSubnetIPNet)).Get("/api/internal/stats", h.handleInternalStats)
 	r.Get("/", h.handleGetEmpty)
 	r.Get("/{id}", h.handleGet)
 	return r
-}
-
-func parseXRealIP(s string) (net.IP, bool) {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return nil, false
-	}
-	if i := strings.IndexByte(s, ','); i >= 0 {
-		s = strings.TrimSpace(s[:i])
-	}
-	if ip := net.ParseIP(s); ip != nil {
-		return ip, true
-	}
-	host, _, err := net.SplitHostPort(s)
-	if err == nil {
-		if ip := net.ParseIP(host); ip != nil {
-			return ip, true
-		}
-	}
-	return nil, false
 }
 
 // handlePing handles GET /ping.
@@ -146,18 +118,9 @@ func (h *Shortener) handlePing(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// handleInternalStats handles GET /api/internal/stats for trusted subnets only (header X-Real-IP).
+// handleInternalStats handles GET /api/internal/stats (trusted subnet enforced by middleware).
 func (h *Shortener) handleInternalStats(w http.ResponseWriter, r *http.Request) {
-	if h.trustedSubnetIPNet == nil {
-		http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
-		return
-	}
-	clientIP, ok := parseXRealIP(r.Header.Get("X-Real-IP"))
-	if !ok || !h.trustedSubnetIPNet.Contains(clientIP) {
-		http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
-		return
-	}
-	urls, users, err := h.service.Stats(r.Context())
+	urls, users, err := h.facade.Svc.Stats(r.Context())
 	if err != nil {
 		h.logger.Errorw("failed to compute stats", "error", err)
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
@@ -200,8 +163,12 @@ func (h *Shortener) handlePost(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
-	shortURL, conflict, err := h.service.ShortenURL(r.Context(), originalURL, userID)
+	shortURL, conflict, err := h.facade.Shorten(r.Context(), userID, originalURL)
 	if err != nil {
+		if errors.Is(err, urlapi.ErrEmptyURL) {
+			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+			return
+		}
 		h.logger.Errorw("failed to build short URL", "error", err)
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
@@ -214,10 +181,6 @@ func (h *Shortener) handlePost(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusCreated)
 	}
 	w.Write([]byte(shortURL))
-
-	if h.auditSvc != nil {
-		h.auditSvc.Notify("shorten", userID, originalURL)
-	}
 }
 
 // handleGet handles GET /{id}.
@@ -230,7 +193,7 @@ func (h *Shortener) handleGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	originalURL, err := h.service.GetOriginalURL(r.Context(), id)
+	originalURL, err := h.facade.Expand(r.Context(), id)
 	if err != nil {
 		if errors.Is(err, service.ErrURLDeleted) {
 			w.WriteHeader(http.StatusGone)
@@ -243,9 +206,9 @@ func (h *Shortener) handleGet(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Location", originalURL)
 	w.WriteHeader(http.StatusTemporaryRedirect)
 
-	if h.auditSvc != nil {
+	if h.facade.Audit != nil {
 		userID, _ := middleware.GetUserID(r.Context())
-		h.auditSvc.Notify("follow", userID, originalURL)
+		h.facade.Audit.Notify("follow", userID, originalURL)
 	}
 }
 
@@ -279,8 +242,12 @@ func (h *Shortener) handlePostJSON(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
-	shortURL, conflict, err := h.service.ShortenURL(r.Context(), originalURL, userID)
+	shortURL, conflict, err := h.facade.Shorten(r.Context(), userID, originalURL)
 	if err != nil {
+		if errors.Is(err, urlapi.ErrEmptyURL) {
+			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+			return
+		}
 		h.logger.Errorw("failed to build short URL", "error", err)
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
@@ -301,10 +268,6 @@ func (h *Shortener) handlePostJSON(w http.ResponseWriter, r *http.Request) {
 		h.logger.Errorw("failed to encode response", "error", err)
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
-	}
-
-	if h.auditSvc != nil {
-		h.auditSvc.Notify("shorten", userID, originalURL)
 	}
 }
 
@@ -350,14 +313,14 @@ func (h *Shortener) handlePostBatch(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
-	batchItems, err := h.service.ShortenURLBatch(r.Context(), originalURLs, userID)
+	batchItems, err := h.facade.Svc.ShortenURLBatch(r.Context(), originalURLs, userID)
 	if err != nil {
 		h.logger.Errorw("failed to shorten URL batch", "error", err)
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
 
-	baseURL := h.service.BaseURL()
+	baseURL := h.facade.Svc.BaseURL()
 	response := make([]batchResponseItem, 0, len(batchItems))
 	for i, item := range batchItems {
 		shortURL, err := url.JoinPath(baseURL, item.ShortID)
@@ -392,7 +355,7 @@ func (h *Shortener) handleGetUserURLs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	urls, err := h.service.GetURLsByUser(r.Context(), userID)
+	urls, err := h.facade.ListUserURLsDisplay(r.Context(), userID)
 	if err != nil {
 		h.logger.Errorw("failed to get URLs by user", "error", err, "userID", userID)
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
@@ -404,17 +367,10 @@ func (h *Shortener) handleGetUserURLs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	baseURL := h.service.BaseURL()
 	response := make([]userURLResponse, 0, len(urls))
 	for _, u := range urls {
-		shortURL, err := url.JoinPath(baseURL, u.ShortURL)
-		if err != nil {
-			h.logger.Errorw("failed to build short URL", "error", err)
-			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-			return
-		}
 		response = append(response, userURLResponse{
-			ShortURL:    shortURL,
+			ShortURL:    u.ShortURL,
 			OriginalURL: u.OriginalURL,
 		})
 	}
@@ -455,7 +411,7 @@ func (h *Shortener) handleDeleteUserURLs(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	h.service.DeleteUserURLs(shortIDs, userID)
+	h.facade.Svc.DeleteUserURLs(shortIDs, userID)
 
 	w.WriteHeader(http.StatusAccepted)
 }

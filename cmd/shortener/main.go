@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -135,26 +136,34 @@ func main() {
 	httpMatched := muxL.Match(cmux.Any())
 
 	grpcSrv := grpc.NewServer()
-	grpcserver.Register(grpcSrv, &grpcserver.Server{Facade: urlFacade})
+	grpcserver.Register(grpcSrv, &grpcserver.Server{Facade: urlFacade, Logger: sugar})
 
 	httpSrv := &http.Server{
 		Handler: r,
 	}
 
+	var wg sync.WaitGroup
+
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		sugar.Infow("Multiplexed HTTP+gRPC listener", "addr", cfg.ServerAddress, "tls", cfg.EnableHTTPS)
-		if err := muxL.Serve(); err != nil {
+		if err := muxL.Serve(); err != nil && !strings.Contains(err.Error(), "use of closed") {
 			sugar.Errorw("cmux exited", "error", err)
 		}
 	}()
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		if err := grpcSrv.Serve(grpcMatched); err != nil {
 			sugar.Errorw("gRPC stopped", "error", err)
 		}
 	}()
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		if err := httpSrv.Serve(httpMatched); err != nil && err != http.ErrServerClosed {
-			sugar.Fatalw("HTTP stopped", "error", err)
+			sugar.Errorw("HTTP stopped", "error", err)
 		}
 	}()
 
@@ -172,5 +181,6 @@ func main() {
 		sugar.Warnw("HTTP forced to shutdown", "error", err)
 	}
 	muxL.Close()
+	wg.Wait()
 	sugar.Info("Server stopped")
 }

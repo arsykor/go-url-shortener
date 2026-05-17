@@ -168,14 +168,26 @@ func (r *PostgresURLRepository) DeleteURLs(ctx context.Context, shortIDs []strin
 
 // Stats returns totals of shortened URL rows and distinct non-empty users.
 func (r *PostgresURLRepository) Stats(ctx context.Context) (int, int, error) {
+	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{
+		ReadOnly:  true,
+		Isolation: sql.LevelRepeatableRead,
+	})
+	if err != nil {
+		return 0, 0, fmt.Errorf("stats begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
 	var urls int
-	if err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM url_shortener`).Scan(&urls); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM url_shortener`).Scan(&urls); err != nil {
 		return 0, 0, fmt.Errorf("stats urls count: %w", err)
 	}
 	var users int
 	query := `SELECT COUNT(DISTINCT user_id) FROM url_shortener WHERE COALESCE(TRIM(user_id), '') <> ''`
-	if err := r.db.QueryRowContext(ctx, query).Scan(&users); err != nil {
+	if err := tx.QueryRowContext(ctx, query).Scan(&users); err != nil {
 		return 0, 0, fmt.Errorf("stats users count: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, 0, fmt.Errorf("stats commit: %w", err)
 	}
 	return urls, users, nil
 }

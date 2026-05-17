@@ -4,12 +4,10 @@ package shortenerv1;
 
 option go_package = "github.com/arsykor/go-url-shortener/proto/shortenerv1;shortenerv1";
 
-import "google/protobuf/empty.proto";
-
 service ShortenerService {
   rpc ShortenURL(URLShortenRequest) returns (URLShortenResponse);
   rpc ExpandURL(URLExpandRequest) returns (URLExpandResponse);
-  rpc ListUserURLs(google.protobuf.Empty) returns (UserURLsResponse);
+  rpc ListUserURLs(ListUserURLsRequest) returns (UserURLsResponse);
 }
 
 message URLShortenRequest {
@@ -27,6 +25,8 @@ message URLExpandRequest {
 message URLExpandResponse {
   string result = 1;
 }
+
+message ListUserURLsRequest {}
 
 message UserURLsResponse {
   repeated URLData url = 1;

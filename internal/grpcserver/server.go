@@ -16,7 +16,6 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 const msgInternalError = "internal server error"
@@ -92,7 +91,7 @@ func (s *Server) ExpandURL(ctx context.Context, req *pb.URLExpandRequest) (*pb.U
 }
 
 // ListUserURLs mirrors GET /api/user/urls.
-func (s *Server) ListUserURLs(ctx context.Context, _ *emptypb.Empty) (*pb.UserURLsResponse, error) {
+func (s *Server) ListUserURLs(ctx context.Context, _ *pb.ListUserURLsRequest) (*pb.UserURLsResponse, error) {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
 		return nil, status.Error(codes.Unauthenticated, "missing metadata")

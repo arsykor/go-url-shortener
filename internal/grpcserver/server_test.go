@@ -18,7 +18,6 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/test/bufconn"
-	"google.golang.org/protobuf/types/known/emptypb"
 )
 
 func TestServer_ShortenAndList(t *testing.T) {
@@ -61,7 +60,7 @@ func TestServer_ShortenAndList(t *testing.T) {
 	assert.Equal(t, "https://practicum.yandex.ru", ex.GetResult())
 
 	ctxList := metadata.AppendToOutgoingContext(context.Background(), "authorization", auth)
-	list, err := client.ListUserURLs(ctxList, &emptypb.Empty{})
+	list, err := client.ListUserURLs(ctxList, (&pb.ListUserURLsRequest_builder{}).Build())
 	require.NoError(t, err)
 	urls := list.GetUrl()
 	require.Len(t, urls, 1)

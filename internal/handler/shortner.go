@@ -94,30 +94,10 @@ func (h *Shortener) Router() chi.Router {
 	r.Post("/api/shorten/batch", h.handlePostBatch)
 	r.Get("/api/user/urls", h.handleGetUserURLs)
 	r.Delete("/api/user/urls", h.handleDeleteUserURLs)
-	r.Get("/api/internal/stats", h.handleInternalStats)
+	r.With(middleware.RequireTrustedSubnet(h.trustedSubnetIPNet)).Get("/api/internal/stats", h.handleInternalStats)
 	r.Get("/", h.handleGetEmpty)
 	r.Get("/{id}", h.handleGet)
 	return r
-}
-
-func parseXRealIP(s string) (net.IP, bool) {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return nil, false
-	}
-	if i := strings.IndexByte(s, ','); i >= 0 {
-		s = strings.TrimSpace(s[:i])
-	}
-	if ip := net.ParseIP(s); ip != nil {
-		return ip, true
-	}
-	host, _, err := net.SplitHostPort(s)
-	if err == nil {
-		if ip := net.ParseIP(host); ip != nil {
-			return ip, true
-		}
-	}
-	return nil, false
 }
 
 // handlePing handles GET /ping.
@@ -138,17 +118,8 @@ func (h *Shortener) handlePing(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// handleInternalStats handles GET /api/internal/stats for trusted subnets only (header X-Real-IP).
+// handleInternalStats handles GET /api/internal/stats (trusted subnet enforced by middleware).
 func (h *Shortener) handleInternalStats(w http.ResponseWriter, r *http.Request) {
-	if h.trustedSubnetIPNet == nil {
-		http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
-		return
-	}
-	clientIP, ok := parseXRealIP(r.Header.Get("X-Real-IP"))
-	if !ok || !h.trustedSubnetIPNet.Contains(clientIP) {
-		http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
-		return
-	}
 	urls, users, err := h.facade.Svc.Stats(r.Context())
 	if err != nil {
 		h.logger.Errorw("failed to compute stats", "error", err)

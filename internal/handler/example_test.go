@@ -9,6 +9,7 @@ import (
 
 	"github.com/arsykor/go-url-shortener/internal/repository"
 	"github.com/arsykor/go-url-shortener/internal/service"
+	"github.com/arsykor/go-url-shortener/internal/urlapi"
 	"go.uber.org/zap"
 )
 
@@ -18,7 +19,8 @@ func newExampleHandler() *Shortener {
 	repo := repository.NewInMemoryURLRepository()
 	logger := zap.NewNop().Sugar()
 	svc := service.NewShortenerService(repo, "http://localhost:8080", logger)
-	return NewShortener(svc, nil, logger, nil)
+	f := &urlapi.Facade{Svc: svc, Audit: nil}
+	return NewShortener(f, nil, logger, nil)
 }
 
 // ExampleShortener_handlePost demonstrates shortening a URL via the plain-text

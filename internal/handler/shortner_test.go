@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/arsykor/go-url-shortener/internal/repository"
 	"github.com/arsykor/go-url-shortener/internal/service"
+	"github.com/arsykor/go-url-shortener/internal/urlapi"
 )
 
 func TestHandlerShortener_Post(t *testing.T) {
@@ -80,7 +82,8 @@ func TestHandlerShortener_Post(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := repository.NewInMemoryURLRepository()
 			svc := service.NewShortenerService(repo, "http://localhost:8080", logger)
-			handler := NewShortener(svc, nil, logger, nil)
+			f := &urlapi.Facade{Svc: svc, Audit: nil}
+			handler := NewShortener(f, nil, logger, nil)
 			r := handler.Router()
 
 			req := httptest.NewRequest(tt.method, tt.path, strings.NewReader(tt.body))
@@ -163,7 +166,8 @@ func TestHandlerShortener_Get(t *testing.T) {
 			}
 
 			svc := service.NewShortenerService(repo, "http://localhost:8080", logger)
-			handler := NewShortener(svc, nil, logger, nil)
+			f := &urlapi.Facade{Svc: svc, Audit: nil}
+			handler := NewShortener(f, nil, logger, nil)
 			r := handler.Router()
 
 			req := httptest.NewRequest(tt.method, tt.path, nil)
@@ -187,7 +191,8 @@ func TestHandlerShortener_UnsupportedMethod(t *testing.T) {
 	logger := zap.NewNop().Sugar()
 	repo := repository.NewInMemoryURLRepository()
 	svc := service.NewShortenerService(repo, "http://localhost:8080", logger)
-	handler := NewShortener(svc, nil, logger, nil)
+	f := &urlapi.Facade{Svc: svc, Audit: nil}
+	handler := NewShortener(f, nil, logger, nil)
 	r := handler.Router()
 
 	req := httptest.NewRequest(http.MethodPut, "/", nil)
@@ -284,7 +289,8 @@ func TestHandlerShortener_PostJSON(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := repository.NewInMemoryURLRepository()
 			svc := service.NewShortenerService(repo, "http://localhost:8080", logger)
-			handler := NewShortener(svc, nil, logger, nil)
+			f := &urlapi.Facade{Svc: svc, Audit: nil}
+			handler := NewShortener(f, nil, logger, nil)
 			r := handler.Router()
 
 			req := httptest.NewRequest(tt.method, tt.path, strings.NewReader(tt.body))
@@ -311,6 +317,105 @@ func TestHandlerShortener_PostJSON(t *testing.T) {
 				assert.NotEmpty(t, response.Result)
 				assert.Contains(t, response.Result, "http://localhost:8080/")
 			}
+		})
+	}
+}
+
+func TestHandlerShortener_InternalStats(t *testing.T) {
+	logger := zap.NewNop().Sugar()
+	_, tenNet, err := net.ParseCIDR("10.0.0.0/8")
+	require.NoError(t, err)
+	_, loopback, err := net.ParseCIDR("127.0.0.0/8")
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	tests := []struct {
+		name       string
+		trusted    *net.IPNet
+		xRealIP    string
+		setup      func(*repository.InMemoryURLRepository)
+		wantCode   int
+		wantStats  statsResponse
+		decodeBody bool
+	}{
+		{
+			name:     "empty trusted subnet config denies",
+			trusted:  nil,
+			xRealIP:  "10.0.0.1",
+			wantCode: http.StatusForbidden,
+		},
+		{
+			name:     "missing X-Real-IP denies",
+			trusted:  tenNet,
+			xRealIP:  "",
+			wantCode: http.StatusForbidden,
+		},
+		{
+			name:     "IP outside subnet denies",
+			trusted:  tenNet,
+			xRealIP:  "11.0.0.1",
+			wantCode: http.StatusForbidden,
+		},
+		{
+			name:     "invalid IP in header denies",
+			trusted:  tenNet,
+			xRealIP:  "not-an-ip",
+			wantCode: http.StatusForbidden,
+		},
+		{
+			name:    "trusted IP returns zeros",
+			trusted: tenNet,
+			xRealIP: "10.1.2.3",
+			wantStats: statsResponse{
+				URLs:  0,
+				Users: 0,
+			},
+			wantCode:   http.StatusOK,
+			decodeBody: true,
+		},
+		{
+			name:    "counts urls and distinct users",
+			trusted: loopback,
+			xRealIP: "127.0.0.1",
+			setup: func(repo *repository.InMemoryURLRepository) {
+				_, _ = repo.Save(ctx, "id-one", "https://example.com/a", "user-a")
+				_, _ = repo.Save(ctx, "id-two", "https://example.com/b", "user-a")
+				_, _ = repo.Save(ctx, "id-three", "https://example.com/c", "user-b")
+			},
+			wantStats: statsResponse{
+				URLs:  3,
+				Users: 2,
+			},
+			wantCode:   http.StatusOK,
+			decodeBody: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := repository.NewInMemoryURLRepository()
+			if tt.setup != nil {
+				tt.setup(repo)
+			}
+			svc := service.NewShortenerService(repo, "http://localhost:8080", logger)
+			f := &urlapi.Facade{Svc: svc, Audit: nil}
+			h := NewShortener(f, nil, logger, tt.trusted)
+			req := httptest.NewRequest(http.MethodGet, "/api/internal/stats", nil)
+			if tt.xRealIP != "" {
+				req.Header.Set("X-Real-IP", tt.xRealIP)
+			}
+			w := httptest.NewRecorder()
+			h.Router().ServeHTTP(w, req)
+
+			assert.Equal(t, tt.wantCode, w.Code)
+
+			if !tt.decodeBody {
+				return
+			}
+
+			var got statsResponse
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+			assert.Equal(t, tt.wantStats, got)
 		})
 	}
 }

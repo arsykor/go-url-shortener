@@ -2,21 +2,30 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
+	"sync"
 	"syscall"
 	"time"
+
+	"github.com/soheilhy/cmux"
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
 
 	"github.com/arsykor/go-url-shortener/internal/audit"
 	"github.com/arsykor/go-url-shortener/internal/config"
 	"github.com/arsykor/go-url-shortener/internal/database"
+	"github.com/arsykor/go-url-shortener/internal/grpcserver"
 	"github.com/arsykor/go-url-shortener/internal/handler"
 	"github.com/arsykor/go-url-shortener/internal/repository"
 	"github.com/arsykor/go-url-shortener/internal/service"
-	"go.uber.org/zap"
+	"github.com/arsykor/go-url-shortener/internal/urlapi"
 )
 
 // Build metadata injected at link time via -ldflags:
@@ -95,37 +104,66 @@ func main() {
 	auditSvc := audit.NewService(sugar, auditObservers...)
 
 	shortenerService := service.NewShortenerService(urlRepo, cfg.BaseURL, sugar)
-	shortenerHandler := handler.NewShortener(shortenerService, db, sugar, auditSvc)
+	var trustedSubnet *net.IPNet
+	if cidr := strings.TrimSpace(cfg.TrustedSubnet); cidr != "" {
+		_, n, err := net.ParseCIDR(cidr)
+		if err != nil {
+			sugar.Fatalw("invalid trusted_subnet (CIDR)", "value", cidr, "error", err)
+		}
+		trustedSubnet = n
+	}
+	urlFacade := &urlapi.Facade{Svc: shortenerService, Audit: auditSvc}
+	shortenerHandler := handler.NewShortener(urlFacade, db, sugar, trustedSubnet)
 
 	r := shortenerHandler.Router()
 
-	srv := &http.Server{
-		Addr:    cfg.ServerAddress,
-		Handler: r,
+	tcpLn, err := net.Listen("tcp", cfg.ServerAddress)
+	if err != nil {
+		sugar.Fatalw("listen failed", "addr", cfg.ServerAddress, "error", err)
 	}
 
-	// Initialise TLS synchronously (before go func()).
+	var ln net.Listener = tcpLn
 	if cfg.EnableHTTPS {
 		tlsCfg, err := selfSignedTLSConfig()
 		if err != nil {
 			sugar.Fatalw("Failed to generate TLS certificate", "error", err)
 		}
-		srv.TLSConfig = tlsCfg
+		ln = tls.NewListener(tcpLn, tlsCfg)
 	}
 
-	// Start the server in a goroutine so we can listen for shutdown signals.
+	muxL := cmux.New(ln)
+	grpcMatched := muxL.Match(cmux.HTTP2HeaderField("content-type", "application/grpc"))
+	httpMatched := muxL.Match(cmux.Any())
+
+	grpcSrv := grpc.NewServer()
+	grpcserver.Register(grpcSrv, &grpcserver.Server{Facade: urlFacade, Logger: sugar})
+
+	httpSrv := &http.Server{
+		Handler: r,
+	}
+
+	var wg sync.WaitGroup
+
+	wg.Add(1)
 	go func() {
-		var err error
-		if cfg.EnableHTTPS {
-			sugar.Infow("Starting HTTPS server", "addr", cfg.ServerAddress)
-			// ("", "") - use cert already loaded into srv.TLSConfig
-			err = srv.ListenAndServeTLS("", "")
-		} else {
-			sugar.Infow("Starting HTTP server", "addr", cfg.ServerAddress)
-			err = srv.ListenAndServe()
+		defer wg.Done()
+		sugar.Infow("Multiplexed HTTP+gRPC listener", "addr", cfg.ServerAddress, "tls", cfg.EnableHTTPS)
+		if err := muxL.Serve(); err != nil && !strings.Contains(err.Error(), "use of closed") {
+			sugar.Errorw("cmux exited", "error", err)
 		}
-		if err != nil && err != http.ErrServerClosed {
-			sugar.Fatalw(err.Error(), "event", "start server")
+	}()
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := grpcSrv.Serve(grpcMatched); err != nil {
+			sugar.Errorw("gRPC stopped", "error", err)
+		}
+	}()
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := httpSrv.Serve(httpMatched); err != nil && err != http.ErrServerClosed {
+			sugar.Errorw("HTTP stopped", "error", err)
 		}
 	}()
 
@@ -138,8 +176,11 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	if err := srv.Shutdown(ctx); err != nil {
-		sugar.Warnw("Server forced to shutdown", "error", err)
+	grpcSrv.GracefulStop()
+	if err := httpSrv.Shutdown(ctx); err != nil {
+		sugar.Warnw("HTTP forced to shutdown", "error", err)
 	}
+	muxL.Close()
+	wg.Wait()
 	sugar.Info("Server stopped")
 }
